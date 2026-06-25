@@ -49,9 +49,14 @@ def _ann_query_lance(lance_uri: str, query_doc_id: str, top_k: int, where: str |
         raise ValueError(f"query_doc_id not found in Lance table: {query_doc_id}")
     query_vec = query_table["audio_embedding"][0].as_py()
 
+    import pyarrow as pa
+
     names = set(ds.schema.names)
     cols = [c for c in DEFAULT_COLUMNS if c in names]
-    scanner_kwargs: dict = {"columns": cols, "nearest": {"column": "audio_embedding", "key": query_vec, "k": top_k}}
+    scanner_kwargs: dict = {
+        "columns": cols,
+        "nearest": {"column": "audio_embedding", "q": pa.array(query_vec, type=pa.float32()), "k": top_k},
+    }
     if where:
         scanner_kwargs["filter"] = where
     table = ds.scanner(**scanner_kwargs).to_table()

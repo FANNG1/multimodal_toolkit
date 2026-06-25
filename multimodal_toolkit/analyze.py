@@ -18,13 +18,13 @@ _PHONE_PAT = r"1[3-9]\d{9}"
 
 _ANALYSIS_DTYPE = daft.DataType.struct(
     {
-        "downgrade_related": daft.DataType.bool_(),
+        "downgrade_related": daft.DataType.bool(),
         "primary_reason": daft.DataType.string(),
         "secondary_reason": daft.DataType.string(),
         "summary": daft.DataType.string(),
         "confidence": daft.DataType.float64(),
         "text_emotion": daft.DataType.string(),
-        "bad_tone": daft.DataType.bool_(),
+        "bad_tone": daft.DataType.bool(),
         "emotion_score": daft.DataType.float64(),
     }
 )
@@ -45,7 +45,7 @@ _OUTPUT_COLS = [
 ]
 
 
-@daft.udf(return_dtype=daft.DataType.float64())
+@daft.func.batch(return_dtype=daft.DataType.float64())
 def _duration_udf(audio_blobs):
     import io as _io
 
@@ -64,7 +64,7 @@ def _duration_udf(audio_blobs):
     return results
 
 
-@daft.udf(return_dtype=daft.DataType.string())
+@daft.func.batch(return_dtype=daft.DataType.string())
 def _prompt_udf(transcripts, acoustic_emotions):
     from .prompt import build_prompt
 
@@ -144,22 +144,19 @@ def run(lance_uri: str, out_jsonl: str) -> None:
             ),
         )
     else:
-        df = df.with_column("analysis_json", daft.lit(None))
+        df = df.with_column("analysis_json", daft.lit(None).cast(daft.DataType.string()))
 
-    # Parse JSON → struct → unnest; try_deserialize returns null on failure
+    # Parse JSON → struct, then expand each field; try_deserialize returns null on parse failure
     df = df.with_column("analysis", col("analysis_json").try_deserialize("json", _ANALYSIS_DTYPE))
-    df = df.unnest("analysis")
-
-    # Fill nulls for rows where LLM returned unparseable JSON or no API key
     df = (
-        df.with_column("downgrade_related", col("downgrade_related").fill_null(False))
-        .with_column("primary_reason", col("primary_reason").fill_null("其他"))
-        .with_column("secondary_reason", col("secondary_reason").fill_null(""))
-        .with_column("summary", col("summary").fill_null(""))
-        .with_column("confidence", col("confidence").fill_null(0.0))
-        .with_column("text_emotion", col("text_emotion").fill_null("未知"))
-        .with_column("bad_tone", col("bad_tone").fill_null(False))
-        .with_column("emotion_score", col("emotion_score").fill_null(0.0))
+        df.with_column("downgrade_related", col("analysis")["downgrade_related"].fill_null(False))
+        .with_column("primary_reason", col("analysis")["primary_reason"].fill_null("其他"))
+        .with_column("secondary_reason", col("analysis")["secondary_reason"].fill_null(""))
+        .with_column("summary", col("analysis")["summary"].fill_null(""))
+        .with_column("confidence", col("analysis")["confidence"].fill_null(0.0))
+        .with_column("text_emotion", col("analysis")["text_emotion"].fill_null("未知"))
+        .with_column("bad_tone", col("analysis")["bad_tone"].fill_null(False))
+        .with_column("emotion_score", col("analysis")["emotion_score"].fill_null(0.0))
     )
 
     output = df.select(*_OUTPUT_COLS)
