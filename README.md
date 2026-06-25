@@ -1,45 +1,51 @@
 # multimodal_toolkit
 
-Audio call-centre analysis POC: ingest recordings from S3, transcribe with SenseVoice, analyse with DeepSeek, embed acoustically, and query by filter or nearest-neighbour — all in a Daft-native pipeline backed by Lance blob v2.
+Audio call-centre analysis POC: ingest recordings from S3, store audio as Lance blob v2, transcribe with SenseVoice, analyse with DeepSeek, append acoustic embeddings, and query by scalar filter or nearest-neighbour.
 
 ## Pipeline
 
 | Step | Module | What it does |
 |------|--------|--------------|
 | 1 ingest | `ingest` | Read manifest → Daft S3 download → write Lance blob v2 table |
-| 2 analyze | `analyze` | `take_blobs` → duration filter → SenseVoice ASR → PII redaction → DeepSeek LLM → write JSONL + append scalar columns |
-| 3 embed | `embed` | `take_blobs` → acoustic signal embedding (128-dim RMS+ZCR) → cosine similarity to seed complaints → append vector + flag columns |
+| 2 analyze | `analyze` | `take_blobs` → duration filter → SenseVoice ASR → PII redaction → DeepSeek LLM → write JSON output |
+| 3 embed | `embed` | Lance native `read_blobs` → acoustic signal embedding (128-dim RMS+ZCR) → Lance native `add_columns` |
 | 4 query | `query` | Scalar filter via Daft or ANN via Lance native |
 
 ## Engine decisions
 
 | Engine | Used for | Reason |
 |--------|----------|--------|
-| **Daft** | manifest read, S3 download, Lance write, blob materialization (`daft_lance.take_blobs`), scalar query, LLM/ASR pipeline | Primary compute engine |
-| **Lance native** | ANN query (`scanner(nearest=...)`) | `daft.read_lance` hides `_distance`; Lance native exposes it for ranking |
-| **lance-ray** | `add_columns` after analyze/embed | Primary engine for appending computed columns; Lance native is the fallback |
+| **Daft** | manifest read, S3 download, Lance write, blob materialization (`daft_lance.take_blobs`), scalar query, ASR/LLM analysis pipeline | Primary compute engine where current APIs are stable |
+| **Lance native** | embedding blob reads, `add_columns`, ANN query (`scanner(nearest=...)`) | Stable path for blob v2 bytes, appending new columns, and exposing `_distance` |
+| **lance-ray** | future distributed embedding/write-back path | Current write-back APIs need a newer/stable release for this blob-v2 POC |
 
 Blob v2 is validated after ingest and never silently downgraded to `large_binary`.
 
+Current TODOs:
+
+- `analyze` writes JSON but does not yet append scalar analysis columns back to Lance.
+- `embed` appends only `audio_embedding`; similar-complaint flags are not currently computed.
+- `daft_lance.merge_columns_df` is not used for embedding because the blob-v2 write-back path has correctness/compatibility issues in this POC.
+- `lance-ray` can read blob bytes through `read_lance`, but the write-back path is deferred until a newer/stable release is available.
+
 ## Verified versions and runtime
 
-Verified end-to-end (local and S3 Lance URI, local and Ray Daft runner) with the project-managed `uv.lock` / `.venv`:
+Verified with the project-managed `uv.lock` / `.venv`:
 
 | Component | Version | Notes |
 |-----------|---------|-------|
 | Daft | 0.7.15 | Main execution engine |
 | daft-lance | 0.4.0 | Required for `read_lance`, `write_lance`, and `take_blobs` |
 | Lance Python / pylance | 7.0.0 | Lance dataset, blob v2, and native ANN scanner APIs |
-| lance-ray | 0.4.2 | Used for `add_columns`; Lance native is the fallback |
+| lance-ray | 0.4.2 | Installed for follow-up distributed tests; not on the current embedding write-back path |
 | Ray | 2.55.1 | Pulled in by `lance-ray`; Daft does not use Ray unless `USE_RAY=1` |
 
 Default runtime:
 
 - Daft runner: `native` (local multi-threaded).
-- `lance-ray` may start a local Ray instance when appending computed columns after `analyze` / `embed`.
-- Set `USE_RAY=1` to run the `ingest`, `analyze`, and `embed` Daft pipelines on Ray. `query` always runs locally.
+- Set `USE_RAY=1` to run Daft-backed steps on Ray. `query` and the current Lance-native embedding write-back run locally.
 
-Both local (`/tmp/calls.lance`) and S3 (`s3://bucket/calls.lance`) Lance URIs are supported throughout the pipeline.
+Local Lance URIs are verified end-to-end. S3 Lance table write/read support is partially exercised by the underlying libraries but should be treated as a separate validation item for this POC.
 
 ## Setup
 
@@ -86,9 +92,7 @@ mmt-ingest  --manifest s3://bucket/audio/manifest.parquet \
 mmt-analyze --lance-uri s3://bucket/audio/calls.lance \
             --out-jsonl s3://bucket/audio/analysis.jsonl
 
-mmt-embed   --lance-uri s3://bucket/audio/calls.lance \
-            --seed-doc-ids call_001.mp3,call_002.mp3 \
-            --threshold 0.80
+mmt-embed   --lance-uri s3://bucket/audio/calls.lance
 
 # Scalar filter
 mmt-query   --lance-uri s3://bucket/audio/calls.lance \
@@ -106,4 +110,24 @@ mmt-query   --lance-uri s3://bucket/audio/calls.lance \
             --export-audio-dir /tmp/audio_out
 ```
 
-Without `uv` installation, use `python -m multimodal_toolkit.<step>` in place of `mmt-<step>`.
+For local verification, use:
+
+```sh
+uv run python -m multimodal_toolkit.pipeline.ingest \
+  --manifest s3://contacts/audio_poc/manifest.parquet \
+  --lance-uri /tmp/audio_poc/calls.lance
+
+uv run python -m multimodal_toolkit.pipeline.analyze \
+  --lance-uri /tmp/audio_poc/calls.lance \
+  --out-jsonl /tmp/audio_poc/analysis.json
+
+uv run python -m multimodal_toolkit.pipeline.embed \
+  --lance-uri /tmp/audio_poc/calls.lance
+
+uv run python -m multimodal_toolkit.pipeline.query \
+  --lance-uri /tmp/audio_poc/calls.lance \
+  --query-doc-id call_001.mp3 \
+  --top-k 5
+```
+
+Without `uv` installation, use `python -m multimodal_toolkit.pipeline.<step>` in place of `mmt-<step>`.
