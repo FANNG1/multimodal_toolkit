@@ -1,60 +1,80 @@
 # multimodal_toolkit
 
-Minimal POC for audio multimodal processing:
+Audio call-centre analysis POC: ingest recordings from S3, transcribe with SenseVoice, analyse with DeepSeek, embed acoustically, and query by filter or nearest-neighbour — all in a Daft-native pipeline backed by Lance blob v2.
 
-1. Read an S3/MinIO manifest with only doc_id and s3_url.
-2. Use Daft to download audio and write a Lance table with audio_blob as Lance blob v2.
-3. Analyze Lance rows with SenseVoice + DeepSeek and write JSONL plus scalar columns back to Lance.
-4. Add pure acoustic signal embeddings and mark similarity to complaint seed doc_ids.
-5. Query scalar fields plus embeddings/audio blobs.
+## Pipeline
 
-Engine boundary follows the verified POC under /Users/fanng/opensource/video:
+| Step | Module | What it does |
+|------|--------|--------------|
+| 1 ingest | `ingest` | Read manifest → Daft S3 download → write Lance blob v2 table |
+| 2 analyze | `analyze` | `take_blobs` → duration filter → SenseVoice ASR → PII redaction → DeepSeek LLM → write JSONL + append scalar columns |
+| 3 embed | `embed` | `take_blobs` → acoustic signal embedding (128-dim RMS+ZCR) → cosine similarity to seed complaints → append vector + flag columns |
+| 4 query | `query` | Scalar filter via Daft or ANN via Lance native |
 
-- Daft: read manifest, download S3 objects, write Lance blob v2, scalar/vector query where supported.
-- Lance: materialize blob bodies with read_blobs/take_blobs and append computed columns when Daft has no stable equivalent.
-- lance-ray: reserved for later scale-out add_columns/index optimization tests.
+## Engine decisions
 
-Blob v2 is a hard requirement; the code validates it after ingest and does not silently downgrade to large_binary.
+| Engine | Used for | Reason |
+|--------|----------|--------|
+| **Daft** | manifest read, S3 download, Lance write, blob materialization (`daft_lance.take_blobs`), scalar query, LLM/ASR pipeline | Primary compute engine |
+| **Lance native** | ANN query (`scanner(nearest=...)`) | `daft.read_lance` hides `_distance`; Lance native exposes it for ranking |
+| **lance-ray** | `add_columns` after analyze/embed | Primary engine for appending computed columns; Lance native is the fallback |
+
+Blob v2 is validated after ingest and never silently downgraded to `large_binary`.
 
 ## Setup
 
-Use latest stable versions and lock them:
+```sh
+uv sync --upgrade
+```
 
-    uv sync --upgrade
+Create a `.env` file (or export directly):
 
-Environment variables can be placed in .env:
+```sh
+MINIO_ENDPOINT=http://127.0.0.1:9000
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+MINIO_REGION=us-east-1
 
-    MINIO_ENDPOINT=http://127.0.0.1:9000
-    MINIO_ROOT_USER=minioadmin
-    MINIO_ROOT_PASSWORD=minioadmin
-    MINIO_REGION=us-east-1
-    DEEPSEEK_API_KEY=...
-    DEEPSEEK_BASE_URL=https://api.deepseek.com
-    DEEPSEEK_MODEL=deepseek-chat
-    ASR_DEVICE=cpu
+DEEPSEEK_API_KEY=sk-...          # leave empty to skip LLM analysis
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+
+ASR_DEVICE=cpu                   # or cuda
+
+MIN_DURATION_S=0
+MAX_DURATION_S=1800
+EMBED_BACKEND=signal             # signal (128-dim) or wav2vec2
+```
 
 ## Run
 
-    python -m multimodal_toolkit.ingest --manifest s3://contacts/audio/manifest.parquet --lance-uri /tmp/audio_poc/calls.lance
-    python -m multimodal_toolkit.analyze --lance-uri /tmp/audio_poc/calls.lance --out-jsonl /tmp/audio_poc/analysis.jsonl
-    python -m multimodal_toolkit.embed --lance-uri /tmp/audio_poc/calls.lance --seed-doc-ids doc1,doc2 --threshold 0.80
-    python -m multimodal_toolkit.query --lance-uri /tmp/audio_poc/calls.lance --where "bad_tone = true OR downgrade_related = true" --top-k 5
+Manifest must be parquet, jsonl, or csv with `doc_id` and `s3_url` columns.
 
-Manifest schema is intentionally minimal: doc_id string, s3_url string.
+```sh
+mmt-ingest  --manifest s3://bucket/audio/manifest.parquet \
+            --lance-uri /tmp/calls.lance
 
-## Current local verification notes
+mmt-analyze --lance-uri /tmp/calls.lance \
+            --out-jsonl /tmp/analysis.jsonl
 
-On this machine, with the current Daft 0.7.15 environments:
+mmt-embed   --lance-uri /tmp/calls.lance \
+            --seed-doc-ids call_001.mp3,call_002.mp3 \
+            --threshold 0.80
 
-- Daft can read the S3 manifest from MinIO.
-- Daft functions.download + write_lance(blob_columns=...) can write Lance blob v2 for the audio manifest.
-- Some commands may terminate without printing the final Python output even though the Lance commit succeeds; verify by opening the Lance table.
-- Daft read_lance exposes blob v2 as descriptor structs. Blob body materialization uses Lance native read_blobs, matching the Guangdong image POC.
-- Query supports --engine lance as a final fallback for environments where Daft read_lance cannot collect the final mixed blob/vector table reliably.
+# Scalar filter
+mmt-query   --lance-uri /tmp/calls.lance \
+            --where "bad_tone = true OR downgrade_related = true" \
+            --top-k 5
 
-The preferred local run is:
+# ANN: recordings acoustically similar to a reference
+mmt-query   --lance-uri /tmp/calls.lance \
+            --query-doc-id call_001.mp3 \
+            --top-k 5
 
-    python -m multimodal_toolkit.ingest --manifest s3://contacts/audio_poc/manifest.parquet --lance-uri /tmp/audio_poc/calls.lance
-    python -m multimodal_toolkit.analyze --lance-uri /tmp/audio_poc/calls.lance --out-jsonl /tmp/audio_poc/analysis.jsonl
-    python -m multimodal_toolkit.embed --lance-uri /tmp/audio_poc/calls.lance --seed-doc-ids call_006_package_downgrade.mp3 --threshold 0.80
-    python -m multimodal_toolkit.query --lance-uri /tmp/audio_poc/calls.lance --where "bad_tone = true OR downgrade_related = true" --top-k 5 --engine lance
+# Export matching audio to local directory
+mmt-query   --lance-uri /tmp/calls.lance \
+            --where "downgrade_related = true" \
+            --export-audio-dir /tmp/audio_out
+```
+
+Without `uv` installation, use `python -m multimodal_toolkit.<step>` in place of `mmt-<step>`.

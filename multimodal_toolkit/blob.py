@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class EngineAttempt:
+class _EngineAttempt:
     engine: str
     ok: bool
     detail: str
@@ -35,15 +35,15 @@ def validate_blob_v2(lance_uri: str, column: str = "audio_blob") -> None:
         )
 
 
-def list_doc_ids(lance_uri: str) -> list[str]:
-    attempts: list[EngineAttempt] = []
+def _list_doc_ids(lance_uri: str) -> list[str]:
+    attempts: list[_EngineAttempt] = []
     try:
         import daft
 
         ids = daft.read_lance(lance_uri).select("doc_id").collect().to_pydict()["doc_id"]
         return [str(x) for x in ids]
     except Exception as exc:
-        attempts.append(EngineAttempt("daft", False, repr(exc)))
+        attempts.append(_EngineAttempt("daft", False, repr(exc)))
 
     try:
         import lance_ray as lr
@@ -51,7 +51,7 @@ def list_doc_ids(lance_uri: str) -> list[str]:
         ids = lr.read_lance(lance_uri, columns=["doc_id"]).to_pandas()["doc_id"].astype(str).tolist()
         return ids
     except Exception as exc:
-        attempts.append(EngineAttempt("lance-ray", False, repr(exc)))
+        attempts.append(_EngineAttempt("lance-ray", False, repr(exc)))
 
     try:
         import lance
@@ -59,7 +59,7 @@ def list_doc_ids(lance_uri: str) -> list[str]:
         table = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri)).to_table(columns=["doc_id"])
         return [str(x) for x in table["doc_id"].to_pylist()]
     except Exception as exc:
-        attempts.append(EngineAttempt("lance", False, repr(exc)))
+        attempts.append(_EngineAttempt("lance", False, repr(exc)))
         raise RuntimeError(f"Unable to list doc_id via any engine: {attempts}") from exc
 
 
@@ -69,7 +69,7 @@ def append_columns_by_doc_id(lance_uri: str, table: "pa.Table") -> None:
     if "doc_id" not in table.column_names:
         raise ValueError("append table must include doc_id")
 
-    attempts: list[EngineAttempt] = []
+    attempts: list[_EngineAttempt] = []
     new_cols = [c for c in table.column_names if c != "doc_id"]
     values = table.to_pydict()
     by_id = {
@@ -103,12 +103,12 @@ def append_columns_by_doc_id(lance_uri: str, table: "pa.Table") -> None:
                     os.environ["LANCE_STORAGE_OPTIONS"] = prev
         return
     except Exception as exc:
-        attempts.append(EngineAttempt("lance-ray", False, repr(exc)))
+        attempts.append(_EngineAttempt("lance-ray", False, repr(exc)))
 
     try:
         import lance
 
-        ids = list_doc_ids(lance_uri)
+        ids = _list_doc_ids(lance_uri)
         schema = pa.schema([table.schema.field(c) for c in new_cols])
         arrays = []
         for col in new_cols:
@@ -118,7 +118,7 @@ def append_columns_by_doc_id(lance_uri: str, table: "pa.Table") -> None:
         lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri)).add_columns(reader)
         return
     except Exception as exc:
-        attempts.append(EngineAttempt("lance", False, repr(exc)))
+        attempts.append(_EngineAttempt("lance", False, repr(exc)))
         raise RuntimeError(f"Unable to append columns by doc_id: {attempts}") from exc
 
 
