@@ -23,7 +23,7 @@ Blob v2 is validated after ingest and never silently downgraded to `large_binary
 
 ## Verified versions and runtime
 
-The current POC has been verified with the project-managed `uv.lock` / `.venv`:
+Verified end-to-end (local and S3 Lance URI, local and Ray Daft runner) with the project-managed `uv.lock` / `.venv`:
 
 | Component | Version | Notes |
 |-----------|---------|-------|
@@ -31,13 +31,15 @@ The current POC has been verified with the project-managed `uv.lock` / `.venv`:
 | daft-lance | 0.4.0 | Required for `read_lance`, `write_lance`, and `take_blobs` |
 | Lance Python / pylance | 7.0.0 | Lance dataset, blob v2, and native ANN scanner APIs |
 | lance-ray | 0.4.2 | Used for `add_columns`; Lance native is the fallback |
-| Ray | 2.55.1 | Pulled in by `lance-ray`; Daft does not use Ray unless explicitly configured |
+| Ray | 2.55.1 | Pulled in by `lance-ray`; Daft does not use Ray unless `USE_RAY=1` |
 
 Default runtime:
 
 - Daft runner: `native` (local multi-threaded).
-- `lance-ray` may start Ray when appending computed columns after `analyze` / `embed`.
+- `lance-ray` may start a local Ray instance when appending computed columns after `analyze` / `embed`.
 - Set `USE_RAY=1` to run the `ingest`, `analyze`, and `embed` Daft pipelines on Ray. `query` always runs locally.
+
+Both local (`/tmp/calls.lance`) and S3 (`s3://bucket/calls.lance`) Lance URIs are supported throughout the pipeline.
 
 ## Setup
 
@@ -70,30 +72,36 @@ RAY_ADDRESS=                     # Ray cluster address; empty = start/join local
 ## Run
 
 Manifest must be parquet, jsonl, or csv with `doc_id` and `s3_url` columns.
+`--lance-uri` accepts both local paths and `s3://` URIs.
 
 ```sh
+# Local Lance table
 mmt-ingest  --manifest s3://bucket/audio/manifest.parquet \
             --lance-uri /tmp/calls.lance
 
-mmt-analyze --lance-uri /tmp/calls.lance \
-            --out-jsonl /tmp/analysis.jsonl
+# S3 Lance table
+mmt-ingest  --manifest s3://bucket/audio/manifest.parquet \
+            --lance-uri s3://bucket/audio/calls.lance
 
-mmt-embed   --lance-uri /tmp/calls.lance \
+mmt-analyze --lance-uri s3://bucket/audio/calls.lance \
+            --out-jsonl s3://bucket/audio/analysis.jsonl
+
+mmt-embed   --lance-uri s3://bucket/audio/calls.lance \
             --seed-doc-ids call_001.mp3,call_002.mp3 \
             --threshold 0.80
 
 # Scalar filter
-mmt-query   --lance-uri /tmp/calls.lance \
+mmt-query   --lance-uri s3://bucket/audio/calls.lance \
             --where "bad_tone = true OR downgrade_related = true" \
             --top-k 5
 
 # ANN: recordings acoustically similar to a reference
-mmt-query   --lance-uri /tmp/calls.lance \
+mmt-query   --lance-uri s3://bucket/audio/calls.lance \
             --query-doc-id call_001.mp3 \
             --top-k 5
 
 # Export matching audio to local directory
-mmt-query   --lance-uri /tmp/calls.lance \
+mmt-query   --lance-uri s3://bucket/audio/calls.lance \
             --where "downgrade_related = true" \
             --export-audio-dir /tmp/audio_out
 ```
