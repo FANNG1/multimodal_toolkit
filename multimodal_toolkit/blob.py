@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 
 from .io import lance_storage_options
 
@@ -61,34 +61,6 @@ def list_doc_ids(lance_uri: str) -> list[str]:
     except Exception as exc:
         attempts.append(EngineAttempt("lance", False, repr(exc)))
         raise RuntimeError(f"Unable to list doc_id via any engine: {attempts}") from exc
-
-
-def read_audio_blobs(lance_uri: str, doc_ids: Iterable[str] | None = None) -> dict[str, bytes | None]:
-    """Read audio blob bytes.
-
-    Daft remains the primary engine for manifest/S3/write/query scalar work.
-    Daft exposes Lance blob v2 columns as descriptor structs, which is useful
-    for metadata scans but not for ASR/embedding. This follows the Guangdong
-    image POC: materialize blob bodies with Lance native read_blobs/take_blobs.
-    """
-    wanted = [str(x) for x in doc_ids] if doc_ids is not None else None
-    wanted_set = set(wanted) if wanted is not None else None
-    attempts: list[EngineAttempt] = []
-
-    try:
-        import lance
-
-        ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
-        ids = [str(x) for x in ds.to_table(columns=["doc_id"])["doc_id"].to_pylist()]
-        indices = [i for i, doc_id in enumerate(ids) if wanted_set is None or doc_id in wanted_set]
-        blob_rows = ds.read_blobs("audio_blob", indices=indices, preserve_order=True)
-        out = {}
-        for row_idx, blob in blob_rows:
-            out[ids[row_idx]] = blob
-        return out
-    except Exception as exc:
-        attempts.append(EngineAttempt("lance", False, repr(exc)))
-        raise RuntimeError(f"Unable to read blob v2 via Lance native blob API: {attempts}") from exc
 
 
 def append_columns_by_doc_id(lance_uri: str, table: "pa.Table") -> None:

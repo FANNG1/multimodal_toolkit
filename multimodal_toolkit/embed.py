@@ -2,9 +2,33 @@ from __future__ import annotations
 
 import argparse
 
+import daft
+import daft_lance
+import lance
+from daft import col
+
 from . import config
 from .audio_embedding import cosine_score, get_embedder
-from .blob import append_columns_by_doc_id, read_audio_blobs, validate_blob_v2
+from .blob import append_columns_by_doc_id, validate_blob_v2
+from .io import daft_io_config, lance_storage_options
+
+
+@daft.cls(cpus=1)
+class _EmbedUDF:
+    def __init__(self) -> None:
+        self._embedder = get_embedder()
+
+    @daft.method.batch(
+        return_dtype=daft.DataType.fixed_size_list(daft.DataType.float32(), config.EMBED_DIM)
+    )
+    def __call__(self, audio_blobs):
+        results = []
+        for blob in audio_blobs.to_pylist():
+            if blob is None:
+                results.append(None)
+                continue
+            results.append(self._embedder.embed_bytes(blob.read()))
+        return results
 
 
 def run(lance_uri: str, seed_doc_ids: list[str], threshold: float) -> None:
@@ -14,32 +38,41 @@ def run(lance_uri: str, seed_doc_ids: list[str], threshold: float) -> None:
         raise ValueError("--seed-doc-ids is required for similar_complaint classification")
     validate_blob_v2(lance_uri, "audio_blob")
 
-    blobs = read_audio_blobs(lance_uri)
-    embedder = get_embedder()
-    embeddings: dict[str, list[float] | None] = {}
-    for doc_id, audio_bytes in blobs.items():
-        embeddings[doc_id] = embedder.embed_bytes(audio_bytes)
+    io_config = daft_io_config()
+    ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
 
-    missing_seeds = [x for x in seed_doc_ids if x not in embeddings]
+    df = daft.read_lance(lance_uri, io_config=io_config, default_scan_options={"with_row_id": True})
+    df = df.select("doc_id", "audio_blob", "_rowid")
+    df = daft_lance.take_blobs(df, ds, "audio_blob")
+
+    embed_udf = _EmbedUDF()
+    df = df.with_column("audio_embedding", embed_udf(col("audio_blob")))
+    df = df.select("doc_id", "audio_embedding")
+
+    # Collect all embeddings then run O(N*M) seed classification in Python.
+    # N (call records) is small in this POC; avoids a second full pipeline pass.
+    data = df.collect().to_pydict()
+    doc_ids = [str(x) for x in data["doc_id"]]
+    emb_map = dict(zip(doc_ids, data["audio_embedding"]))
+
+    missing_seeds = [x for x in seed_doc_ids if x not in emb_map]
     if missing_seeds:
         raise ValueError(f"seed doc_id not found in Lance table: {missing_seeds}")
 
     rows = []
-    for doc_id, emb in embeddings.items():
-        best_seed = ""
-        best_score = 0.0
-        for seed_id in seed_doc_ids:
-            if seed_id == doc_id:
+    for doc_id, emb in emb_map.items():
+        best_seed, best_score = "", 0.0
+        for sid in seed_doc_ids:
+            if sid == doc_id:
                 continue
-            score = cosine_score(emb, embeddings[seed_id])
+            score = cosine_score(emb, emb_map[sid])
             if score > best_score:
-                best_score = score
-                best_seed = seed_id
+                best_score, best_seed = score, sid
         rows.append(
             {
                 "doc_id": doc_id,
                 "audio_embedding": emb,
-                "similar_complaint": bool(best_score >= threshold),
+                "similar_complaint": best_score >= threshold,
                 "nearest_seed_doc_id": best_seed,
                 "nearest_seed_score": best_score,
             }
