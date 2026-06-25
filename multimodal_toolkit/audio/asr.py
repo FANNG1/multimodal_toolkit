@@ -5,7 +5,7 @@ import re
 import tempfile
 from collections import Counter
 
-from . import config
+from .. import config
 
 _EMO_RE = re.compile(r"<\|(HAPPY|SAD|ANGRY|NEUTRAL|FEARFUL|DISGUSTED|SURPRISED|EMO_UNKNOWN)\|>")
 _EMO_NOISE = {"NEUTRAL", "EMO_UNKNOWN"}

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 
-from .blob import validate_blob_v2
-from .io import configure_daft_runner, daft_io_config, read_manifest
+from ..storage.blob import validate_blob_v2
+from ..storage.io import configure_daft_runner, daft_io_config, read_manifest
 
 
 def _build_with_daft_download(manifest: str):

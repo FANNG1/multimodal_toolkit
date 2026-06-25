@@ -8,9 +8,9 @@ import lance
 from daft import col
 from daft.functions import llm_generate, regexp_replace
 
-from . import config
-from .blob import append_columns_by_doc_id, validate_blob_v2
-from .io import configure_daft_runner, daft_io_config, lance_storage_options
+from .. import config
+from ..storage.blob import append_columns_by_doc_id, validate_blob_v2
+from ..storage.io import configure_daft_runner, daft_io_config, lance_storage_options
 
 # Rust regex (no look-around): match ID card before phone to avoid partial overlap
 _ID_CARD_PAT = r"\d{17}[\dXx]"
@@ -66,7 +66,7 @@ def _duration_udf(audio_blobs):
 
 @daft.func.batch(return_dtype=daft.DataType.string())
 def _prompt_udf(transcripts, acoustic_emotions):
-    from .prompt import build_prompt
+    from multimodal_toolkit.audio.prompt import build_prompt
 
     return [
         build_prompt(t or "", e or "NEUTRAL")
@@ -77,7 +77,7 @@ def _prompt_udf(transcripts, acoustic_emotions):
 @daft.cls(cpus=1)
 class _AsrUDF:
     def __init__(self) -> None:
-        from .asr import SenseVoiceASR
+        from multimodal_toolkit.audio.asr import SenseVoiceASR
 
         self._asr = SenseVoiceASR()
 

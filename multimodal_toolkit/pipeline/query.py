@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .io import daft_io_config, lance_storage_options
+from ..storage.io import daft_io_config, lance_storage_options
 
 
 DEFAULT_COLUMNS = [

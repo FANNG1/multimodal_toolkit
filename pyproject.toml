@@ -22,10 +22,10 @@ dependencies = [
 ]
 
 [project.scripts]
-mmt-ingest = "multimodal_toolkit.ingest:main"
-mmt-analyze = "multimodal_toolkit.analyze:main"
-mmt-embed = "multimodal_toolkit.embed:main"
-mmt-query = "multimodal_toolkit.query:main"
+mmt-ingest = "multimodal_toolkit.pipeline.ingest:main"
+mmt-analyze = "multimodal_toolkit.pipeline.analyze:main"
+mmt-embed = "multimodal_toolkit.pipeline.embed:main"
+mmt-query = "multimodal_toolkit.pipeline.query:main"
 
 [build-system]
 requires = ["hatchling"]

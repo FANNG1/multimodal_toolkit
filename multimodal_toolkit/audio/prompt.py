@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from . import config
+from .. import config
 
 
 def build_prompt(transcript: str, acoustic_emotion: str) -> str:

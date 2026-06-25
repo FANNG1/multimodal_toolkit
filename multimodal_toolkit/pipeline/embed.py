@@ -7,10 +7,10 @@ import daft_lance
 import lance
 from daft import col
 
-from . import config
-from .audio_embedding import cosine_score, get_embedder
-from .blob import append_columns_by_doc_id, validate_blob_v2
-from .io import configure_daft_runner, daft_io_config, lance_storage_options
+from .. import config
+from ..audio.embedding import cosine_score, get_embedder
+from ..storage.blob import append_columns_by_doc_id, validate_blob_v2
+from ..storage.io import configure_daft_runner, daft_io_config, lance_storage_options
 
 
 @daft.cls(cpus=1)

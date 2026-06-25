@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from . import config
+from .. import config
 
 
 def daft_io_config():
@@ -39,7 +39,7 @@ def lance_storage_options(uri: str) -> dict:
 
 def configure_daft_runner() -> None:
     """Switch Daft to the Ray runner when USE_RAY=1, otherwise leave the default (native)."""
-    from . import config
+    from .. import config
 
     if not config.USE_RAY:
         return
