@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 
 import daft
+import daft_lance
+import lance
 from daft import col
-from daft.functions import llm_generate, monotonically_increasing_id, regexp_replace
+from daft.functions import llm_generate, regexp_replace
 
 from . import config
-from .blob import append_columns_by_doc_id, make_blob_reader, validate_blob_v2
-from .io import daft_io_config
+from .blob import append_columns_by_doc_id, validate_blob_v2
+from .io import daft_io_config, lance_storage_options
 
 # Rust regex (no look-around): match ID card before phone to avoid partial overlap
 _ID_CARD_PAT = r"\d{17}[\dXx]"
@@ -44,18 +46,18 @@ _OUTPUT_COLS = [
 
 
 @daft.udf(return_dtype=daft.DataType.float64())
-def _duration_udf(audio_bytes):
+def _duration_udf(audio_blobs):
     import io as _io
 
     import soundfile as sf
 
     results = []
-    for b in audio_bytes.to_pylist():
-        if not b:
+    for blob in audio_blobs.to_pylist():
+        if blob is None:
             results.append(0.0)
             continue
         try:
-            info = sf.info(_io.BytesIO(b))
+            info = sf.info(_io.BytesIO(blob.read()))
             results.append(float(info.frames) / info.samplerate if info.samplerate else 0.0)
         except Exception:
             results.append(0.0)
@@ -87,15 +89,16 @@ class _AsrUDF:
             }
         )
     )
-    def __call__(self, audio_bytes, s3_urls):
+    def __call__(self, audio_blobs, s3_urls):
         from pathlib import Path
 
         results = []
-        for b, url in zip(audio_bytes.to_pylist(), s3_urls.to_pylist()):
+        for blob, url in zip(audio_blobs.to_pylist(), s3_urls.to_pylist()):
             suffix = Path(url).suffix if url else ".wav"
             if not suffix:
                 suffix = ".wav"
-            results.append(self._asr.transcribe_bytes(b, suffix))
+            audio_bytes = blob.read() if blob is not None else None
+            results.append(self._asr.transcribe_bytes(audio_bytes, suffix))
         return results
 
 
@@ -104,21 +107,19 @@ def run(lance_uri: str, out_jsonl: str) -> None:
 
     validate_blob_v2(lance_uri, "audio_blob")
 
-    # _row_idx must be added before any filter so it aligns with Lance row indices.
-    # make_blob_reader reads bytes via lance.read_blobs(indices=...) — no S3 re-download.
-    blob_reader = make_blob_reader(lance_uri, "audio_blob")
-    df = daft.read_lance(lance_uri, io_config=io_config).select("doc_id", "s3_url")
-    df = df.with_column("_row_idx", monotonically_increasing_id())
-    df = df.with_column("audio_bytes", blob_reader(col("_row_idx")))
-    df = df.where(~col("audio_bytes").is_null())
+    ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
+    df = daft.read_lance(lance_uri, io_config=io_config, default_scan_options={"with_row_id": True})
+    df = df.select("doc_id", "s3_url", "audio_blob", "_rowid")
+    df = daft_lance.take_blobs(df, ds, "audio_blob")
+    df = df.where(~col("audio_blob").is_null())
 
     # Duration quality gate
-    df = df.with_column("duration_s", _duration_udf(col("audio_bytes")))
+    df = df.with_column("duration_s", _duration_udf(col("audio_blob")))
     df = df.where((col("duration_s") >= config.MIN_DURATION_S) & (col("duration_s") <= config.MAX_DURATION_S))
 
     # ASR (stateful: model loads once per worker)
     asr = _AsrUDF()
-    df = df.with_column("asr", asr(col("audio_bytes"), col("s3_url")))
+    df = df.with_column("asr", asr(col("audio_blob"), col("s3_url")))
     df = df.with_column("transcript_raw", col("asr")["transcript"])
     df = df.with_column("acoustic_emotion", col("asr")["acoustic_emotion"])
 

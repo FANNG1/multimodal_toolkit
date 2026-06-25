@@ -5,8 +5,6 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable
 
-import daft
-
 from .io import lance_storage_options
 
 if TYPE_CHECKING:
@@ -152,33 +150,3 @@ def append_columns_by_doc_id(lance_uri: str, table: "pa.Table") -> None:
         raise RuntimeError(f"Unable to append columns by doc_id: {attempts}") from exc
 
 
-def make_blob_reader(lance_uri: str, blob_column: str) -> "daft.UDFClass":
-    """Return a @daft.cls UDF that reads blob bytes from a Lance table.
-
-    Usage in a Daft pipeline:
-        df = daft.read_lance(lance_uri, io_config=io_config)
-        df = df.with_column("_row_idx", daft.functions.monotonically_increasing_id())
-        reader = make_blob_reader(lance_uri, "audio_blob")
-        df = df.with_column("audio_bytes", reader(col("_row_idx")))
-
-    Reads bytes via lance.read_blobs(indices=...) so no S3 re-download is needed.
-    _row_idx must be added before any filter; monotonically_increasing_id() maps
-    to Lance row indices for single-fragment tables in local execution.
-    """
-    storage_opts = lance_storage_options(lance_uri)
-
-    @daft.cls(cpus=1)
-    class _BlobReader:
-        def __init__(self) -> None:
-            import lance as _lance
-
-            self._ds = _lance.dataset(lance_uri, storage_options=storage_opts)
-            self._col = blob_column
-
-        @daft.method.batch(return_dtype=daft.DataType.binary())
-        def __call__(self, row_indices):
-            indices = [int(i) for i in row_indices.to_pylist()]
-            blob_map = dict(self._ds.read_blobs(self._col, indices=indices, preserve_order=True))
-            return [blob_map.get(i) for i in indices]
-
-    return _BlobReader()
