@@ -1,0 +1,35 @@
+[project]
+name = "multimodal-toolkit"
+version = "0.1.0"
+description = "Minimal audio POC: S3 manifest -> Lance blob v2 -> analysis -> acoustic embedding -> query"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "daft-lance>=0.4.0",
+  "funasr",
+  "getdaft",
+  "lance-ray",
+  "modelscope",
+  "openai",
+  "pyarrow",
+  "pylance",
+  "python-dotenv",
+  "ray",
+  "soundfile",
+  "torch",
+  "torchaudio",
+  "transformers",
+]
+
+[project.scripts]
+mmt-ingest = "multimodal_toolkit.ingest:main"
+mmt-analyze = "multimodal_toolkit.analyze:main"
+mmt-embed = "multimodal_toolkit.embed:main"
+mmt-query = "multimodal_toolkit.query:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["multimodal_toolkit"]
