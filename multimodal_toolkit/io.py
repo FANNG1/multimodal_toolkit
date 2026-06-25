@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from . import config
 
 
@@ -51,12 +49,6 @@ def read_manifest(manifest_uri: str):
 
 
 def write_jsonl(rows: list[dict], out_uri: str) -> None:
-    import json
+    import daft
 
-    if out_uri.startswith("s3://"):
-        raise ValueError("S3 JSONL output is not supported in this POC. Use a local --out-jsonl path.")
-
-    data = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
-    path = Path(out_uri)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(data, encoding="utf-8")
+    daft.from_pylist(rows).write_json(out_uri, write_mode="overwrite", io_config=daft_io_config())
