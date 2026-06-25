@@ -46,9 +46,3 @@ def read_manifest(manifest_uri: str):
     if lower.endswith(".csv"):
         return daft.read_csv(manifest_uri, io_config=io_config).select("doc_id", "s3_url")
     raise ValueError(f"Unsupported manifest format: {manifest_uri}. Use parquet/jsonl/csv.")
-
-
-def write_jsonl(rows: list[dict], out_uri: str) -> None:
-    import daft
-
-    daft.from_pylist(rows).write_json(out_uri, write_mode="overwrite", io_config=daft_io_config())
