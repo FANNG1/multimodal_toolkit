@@ -67,14 +67,3 @@ def get_embedder():
         else:
             raise ValueError(f"unsupported EMBED_BACKEND={config.EMBED_BACKEND}")
     return _EMBEDDER
-
-
-def cosine_score(a: list[float] | None, b: list[float] | None) -> float:
-    if a is None or b is None:
-        return 0.0
-    av = np.asarray(a, dtype="float32")
-    bv = np.asarray(b, dtype="float32")
-    denom = float(np.linalg.norm(av) * np.linalg.norm(bv))
-    if denom == 0:
-        return 0.0
-    return float(np.dot(av, bv) / denom)

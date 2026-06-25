@@ -8,16 +8,12 @@ from ..storage.io import daft_io_config, lance_storage_options
 
 DEFAULT_COLUMNS = [
     "doc_id",
-    "s3_url",
     "text_emotion",
     "bad_tone",
     "emotion_score",
     "downgrade_related",
     "primary_reason",
     "secondary_reason",
-    "similar_complaint",
-    "nearest_seed_doc_id",
-    "nearest_seed_score",
 ]
 
 
@@ -56,6 +52,7 @@ def _ann_query_lance(lance_uri: str, query_doc_id: str, top_k: int, where: str |
     scanner_kwargs: dict = {
         "columns": cols,
         "nearest": {"column": "audio_embedding", "q": pa.array(query_vec, type=pa.float32()), "k": top_k},
+        "disable_scoring_autoprojection": True,
     }
     if where:
         scanner_kwargs["filter"] = where
@@ -99,7 +96,7 @@ def run(
         rows = df.collect().to_pydict()
         for doc_id, blob in zip(rows["doc_id"], rows["audio_blob"]):
             if blob:
-                (out_dir / f"{doc_id}.audio").write_bytes(blob.read())
+                (out_dir / doc_id).write_bytes(blob.read())
         print(f"[ok] exported {len(rows['doc_id'])} audio blobs to {out_dir}")
 
 
