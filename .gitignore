@@ -9,3 +9,10 @@ __pycache__/
 /outputs/
 /tmp/
 
+# local audio samples — committed via scripts/init_s3.py, not to git
+/data/audio/*.wav
+/data/audio/*.mp3
+/data/audio/*.m4a
+/data/audio/*.flac
+/data/audio/*.ogg
+
