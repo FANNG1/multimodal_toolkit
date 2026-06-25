@@ -26,12 +26,15 @@ def lance_storage_options(uri: str) -> dict:
     """
     if not uri.startswith("s3://"):
         return {}
-    return {
+    opts = {
         "aws_access_key_id": config.S3_KEY,
         "aws_secret_access_key": config.S3_SECRET,
         "aws_endpoint": config.S3_ENDPOINT,
         "aws_virtual_hosted_style_access": "false",
     }
+    if not config.S3_USE_SSL:
+        opts["allow_http"] = "true"
+    return opts
 
 
 def configure_daft_runner() -> None:
