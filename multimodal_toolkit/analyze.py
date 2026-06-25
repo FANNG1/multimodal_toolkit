@@ -4,10 +4,10 @@ import argparse
 
 import daft
 from daft import col
-from daft.functions import download, llm_generate, regexp_replace
+from daft.functions import llm_generate, monotonically_increasing_id, regexp_replace
 
 from . import config
-from .blob import append_columns_by_doc_id, validate_blob_v2
+from .blob import append_columns_by_doc_id, make_blob_reader, validate_blob_v2
 from .io import daft_io_config
 
 # Rust regex (no look-around): match ID card before phone to avoid partial overlap
@@ -104,10 +104,12 @@ def run(lance_uri: str, out_jsonl: str) -> None:
 
     validate_blob_v2(lance_uri, "audio_blob")
 
-    # audio_blob is lance blob v2; Daft exposes it as a descriptor struct, not bytes.
-    # Re-download from s3_url so the full pipeline stays in Daft.
+    # _row_idx must be added before any filter so it aligns with Lance row indices.
+    # make_blob_reader reads bytes via lance.read_blobs(indices=...) — no S3 re-download.
+    blob_reader = make_blob_reader(lance_uri, "audio_blob")
     df = daft.read_lance(lance_uri, io_config=io_config).select("doc_id", "s3_url")
-    df = df.with_column("audio_bytes", download(col("s3_url"), on_error="null", io_config=io_config))
+    df = df.with_column("_row_idx", monotonically_increasing_id())
+    df = df.with_column("audio_bytes", blob_reader(col("_row_idx")))
     df = df.where(~col("audio_bytes").is_null())
 
     # Duration quality gate
