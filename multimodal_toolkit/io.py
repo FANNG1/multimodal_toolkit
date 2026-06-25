@@ -20,6 +20,22 @@ def daft_io_config():
     )
 
 
+def lance_storage_options(uri: str) -> dict:
+    """Return storage_options for lance.dataset() when uri is an S3 path.
+
+    For local paths returns an empty dict (no-op).
+    MinIO requires path-style access (aws_virtual_hosted_style_access=false).
+    """
+    if not uri.startswith("s3://"):
+        return {}
+    return {
+        "aws_access_key_id": config.S3_KEY,
+        "aws_secret_access_key": config.S3_SECRET,
+        "aws_endpoint": config.S3_ENDPOINT,
+        "aws_virtual_hosted_style_access": "false",
+    }
+
+
 def read_manifest(manifest_uri: str):
     import daft
 

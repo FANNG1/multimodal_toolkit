@@ -6,7 +6,7 @@ from pathlib import Path
 from . import config
 from .asr import get_asr
 from .blob import append_columns_by_doc_id, read_audio_blobs, validate_blob_v2
-from .io import write_jsonl
+from .io import lance_storage_options, write_jsonl
 from .prompt import analyze_with_llm
 
 
@@ -29,7 +29,7 @@ def _suffix_from_url(s3_url: str) -> str:
 def _read_url_map(lance_uri: str) -> dict[str, str]:
     import lance
 
-    ds = lance.dataset(lance_uri)
+    ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
     if "s3_url" not in ds.schema.names:
         return {}
     table = ds.scanner(columns=["doc_id", "s3_url"]).to_table()

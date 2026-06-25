@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable
+
+from .io import lance_storage_options
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -21,7 +25,7 @@ class BlobV2Error(RuntimeError):
 def validate_blob_v2(lance_uri: str, column: str = "audio_blob") -> None:
     import lance
 
-    schema = lance.dataset(lance_uri).schema
+    schema = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri)).schema
     field = schema.field(column)
     field_repr = str(field.type)
     if "lance.blob" not in field_repr:
@@ -52,7 +56,7 @@ def list_doc_ids(lance_uri: str) -> list[str]:
     try:
         import lance
 
-        table = lance.dataset(lance_uri).to_table(columns=["doc_id"])
+        table = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri)).to_table(columns=["doc_id"])
         return [str(x) for x in table["doc_id"].to_pylist()]
     except Exception as exc:
         attempts.append(EngineAttempt("lance", False, repr(exc)))
@@ -74,7 +78,7 @@ def read_audio_blobs(lance_uri: str, doc_ids: Iterable[str] | None = None) -> di
     try:
         import lance
 
-        ds = lance.dataset(lance_uri)
+        ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
         ids = [str(x) for x in ds.to_table(columns=["doc_id"])["doc_id"].to_pylist()]
         indices = [i for i, doc_id in enumerate(ids) if wanted_set is None or doc_id in wanted_set]
         blob_rows = ds.read_blobs("audio_blob", indices=indices, preserve_order=True)
@@ -113,7 +117,18 @@ def append_columns_by_doc_id(lance_uri: str, table: "pa.Table") -> None:
                 arrays.append(pa.array([by_id.get(doc_id, {}).get(col) for doc_id in ids], type=schema.field(col).type))
             return pa.record_batch(arrays, schema=schema)
 
-        lr.add_columns(lance_uri, transform=transform, read_columns=["doc_id"])
+        opts = lance_storage_options(lance_uri)
+        prev = os.environ.get("LANCE_STORAGE_OPTIONS")
+        if opts:
+            os.environ["LANCE_STORAGE_OPTIONS"] = json.dumps(opts)
+        try:
+            lr.add_columns(lance_uri, transform=transform, read_columns=["doc_id"])
+        finally:
+            if opts:
+                if prev is None:
+                    os.environ.pop("LANCE_STORAGE_OPTIONS", None)
+                else:
+                    os.environ["LANCE_STORAGE_OPTIONS"] = prev
         return
     except Exception as exc:
         attempts.append(EngineAttempt("lance-ray", False, repr(exc)))
@@ -128,7 +143,7 @@ def append_columns_by_doc_id(lance_uri: str, table: "pa.Table") -> None:
             arrays.append(pa.array([by_id.get(doc_id, {}).get(col) for doc_id in ids], type=schema.field(col).type))
         out = pa.table(dict(zip(new_cols, arrays, strict=False)), schema=schema)
         reader = pa.RecordBatchReader.from_batches(schema, out.to_batches())
-        lance.dataset(lance_uri).add_columns(reader)
+        lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri)).add_columns(reader)
         return
     except Exception as exc:
         attempts.append(EngineAttempt("lance", False, repr(exc)))

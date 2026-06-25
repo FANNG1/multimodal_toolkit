@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 
 from .blob import validate_blob_v2
 from .io import daft_io_config, read_manifest
@@ -21,12 +20,8 @@ def run(manifest: str, lance_uri: str, overwrite: bool = True) -> None:
     io_config = daft_io_config()
     df = _build_with_daft_download(manifest)
 
-    if overwrite:
-        if lance_uri.startswith("s3://"):
-            raise ValueError("Overwrite for S3 Lance URIs is not supported in this POC; delete the table manually first.")
-        shutil.rmtree(lance_uri, ignore_errors=True)
-
-    df.write_lance(lance_uri, mode="create", io_config=io_config, blob_columns=["audio_blob"])
+    write_mode = "overwrite" if overwrite else "create"
+    df.write_lance(lance_uri, mode=write_mode, io_config=io_config, blob_columns=["audio_blob"])
     validate_blob_v2(lance_uri, "audio_blob")
 
     import daft

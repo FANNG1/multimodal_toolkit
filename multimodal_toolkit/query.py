@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from .blob import read_audio_blobs
-from .io import daft_io_config
+from .io import daft_io_config, lance_storage_options
 
 
 DEFAULT_COLUMNS = [
@@ -45,7 +45,7 @@ def _read_rows_daft(lance_uri: str, where: str | None):
 def _read_rows_lance(lance_uri: str, where: str | None):
     import lance
 
-    ds = lance.dataset(lance_uri)
+    ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
     names = set(ds.schema.names)
     cols = [c for c in DEFAULT_COLUMNS if c in names]
     scanner = ds.scanner(columns=cols, filter=where) if where else ds.scanner(columns=cols)
@@ -60,7 +60,7 @@ def _ann_query_lance(lance_uri: str, query_doc_id: str, top_k: int, where: str |
     """
     import lance
 
-    ds = lance.dataset(lance_uri)
+    ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
     query_table = ds.scanner(columns=["doc_id", "audio_embedding"], filter=f"doc_id = '{query_doc_id}'").to_table()
     if query_table.num_rows == 0:
         raise ValueError(f"query_doc_id not found in Lance table: {query_doc_id}")
