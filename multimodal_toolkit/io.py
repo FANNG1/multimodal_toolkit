@@ -34,6 +34,17 @@ def lance_storage_options(uri: str) -> dict:
     }
 
 
+def configure_daft_runner() -> None:
+    """Switch Daft to the Ray runner when USE_RAY=1, otherwise leave the default (native)."""
+    from . import config
+
+    if not config.USE_RAY:
+        return
+    import daft
+
+    daft.set_runner_ray(address=config.RAY_ADDRESS, noop_if_initialized=True)
+
+
 def read_manifest(manifest_uri: str):
     import daft
 

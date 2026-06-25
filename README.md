@@ -21,6 +21,24 @@ Audio call-centre analysis POC: ingest recordings from S3, transcribe with Sense
 
 Blob v2 is validated after ingest and never silently downgraded to `large_binary`.
 
+## Verified versions and runtime
+
+The current POC has been verified with the project-managed `uv.lock` / `.venv`:
+
+| Component | Version | Notes |
+|-----------|---------|-------|
+| Daft | 0.7.15 | Main execution engine |
+| daft-lance | 0.4.0 | Required for `read_lance`, `write_lance`, and `take_blobs` |
+| Lance Python / pylance | 7.0.0 | Lance dataset, blob v2, and native ANN scanner APIs |
+| lance-ray | 0.4.2 | Used for `add_columns`; Lance native is the fallback |
+| Ray | 2.55.1 | Pulled in by `lance-ray`; Daft does not use Ray unless explicitly configured |
+
+Default runtime:
+
+- Daft runner: `native` (local multi-threaded).
+- `lance-ray` may start Ray when appending computed columns after `analyze` / `embed`.
+- Set `USE_RAY=1` to run the `ingest`, `analyze`, and `embed` Daft pipelines on Ray. `query` always runs locally.
+
 ## Setup
 
 ```sh
@@ -44,6 +62,9 @@ ASR_DEVICE=cpu                   # or cuda
 MIN_DURATION_S=0
 MAX_DURATION_S=1800
 EMBED_BACKEND=signal             # signal (128-dim) or wav2vec2
+
+USE_RAY=0                        # set to 1 to run ingest/analyze/embed on Ray
+RAY_ADDRESS=                     # Ray cluster address; empty = start/join local Ray
 ```
 
 ## Run

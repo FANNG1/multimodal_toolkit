@@ -10,7 +10,7 @@ from daft import col
 from . import config
 from .audio_embedding import cosine_score, get_embedder
 from .blob import append_columns_by_doc_id, validate_blob_v2
-from .io import daft_io_config, lance_storage_options
+from .io import configure_daft_runner, daft_io_config, lance_storage_options
 
 
 @daft.cls(cpus=1)
@@ -32,6 +32,8 @@ class _EmbedUDF:
 
 
 def run(lance_uri: str, seed_doc_ids: list[str], threshold: float) -> None:
+    configure_daft_runner()
+
     import pyarrow as pa
 
     if not seed_doc_ids:

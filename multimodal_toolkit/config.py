@@ -39,6 +39,9 @@ EMBED_BACKEND = os.getenv("EMBED_BACKEND", "signal")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "facebook/wav2vec2-base")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "128"))
 
+USE_RAY = os.getenv("USE_RAY", "0").lower() in ("1", "true", "yes")
+RAY_ADDRESS = os.getenv("RAY_ADDRESS") or None  # None = start/join local Ray
+
 PRIMARY_REASONS = [
     "价格敏感",
     "套餐不匹配",

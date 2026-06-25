@@ -10,7 +10,7 @@ from daft.functions import llm_generate, regexp_replace
 
 from . import config
 from .blob import append_columns_by_doc_id, validate_blob_v2
-from .io import daft_io_config, lance_storage_options
+from .io import configure_daft_runner, daft_io_config, lance_storage_options
 
 # Rust regex (no look-around): match ID card before phone to avoid partial overlap
 _ID_CARD_PAT = r"\d{17}[\dXx]"
@@ -103,6 +103,7 @@ class _AsrUDF:
 
 
 def run(lance_uri: str, out_jsonl: str) -> None:
+    configure_daft_runner()
     io_config = daft_io_config()
 
     validate_blob_v2(lance_uri, "audio_blob")

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 
 from .blob import validate_blob_v2
-from .io import daft_io_config, read_manifest
+from .io import configure_daft_runner, daft_io_config, read_manifest
 
 
 def _build_with_daft_download(manifest: str):
@@ -17,6 +17,7 @@ def _build_with_daft_download(manifest: str):
 
 
 def run(manifest: str, lance_uri: str, overwrite: bool = True) -> None:
+    configure_daft_runner()
     io_config = daft_io_config()
     df = _build_with_daft_download(manifest)
 
