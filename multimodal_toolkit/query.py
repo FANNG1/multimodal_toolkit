@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .audio_embedding import cosine_score
 from .blob import read_audio_blobs
 from .io import daft_io_config
 
@@ -53,12 +52,29 @@ def _read_rows_lance(lance_uri: str, where: str | None):
     return scanner.to_table().to_pydict()
 
 
-def _read_embeddings(lance_uri: str) -> dict[str, list[float] | None]:
-    import daft
+def _ann_query_lance(lance_uri: str, query_doc_id: str, top_k: int, where: str | None) -> list[dict]:
+    """ANN query via Lance native scanner(nearest=...).
 
-    df = daft.read_lance(lance_uri, io_config=daft_io_config()).select("doc_id", "audio_embedding")
-    data = df.collect().to_pydict()
-    return {str(doc_id): emb for doc_id, emb in zip(data["doc_id"], data["audio_embedding"], strict=False)}
+    Uses Lance ANN instead of collecting all embeddings into memory.
+    _distance is not schema-hidden here (unlike daft.read_lance).
+    """
+    import lance
+
+    ds = lance.dataset(lance_uri)
+    query_table = ds.scanner(columns=["doc_id", "audio_embedding"], filter=f"doc_id = '{query_doc_id}'").to_table()
+    if query_table.num_rows == 0:
+        raise ValueError(f"query_doc_id not found in Lance table: {query_doc_id}")
+    query_vec = query_table["audio_embedding"][0].as_py()
+
+    names = set(ds.schema.names)
+    cols = [c for c in DEFAULT_COLUMNS if c in names]
+    nearest = {"column": "audio_embedding", "key": query_vec, "k": top_k}
+    scanner_kwargs: dict = {"columns": cols, "nearest": nearest}
+    if where:
+        scanner_kwargs["filter"] = where
+    table = ds.scanner(**scanner_kwargs).to_table()
+    rows = table.to_pydict()
+    return [{k: rows[k][i] for k in rows} for i in range(table.num_rows)]
 
 
 def run(
@@ -69,37 +85,26 @@ def run(
     export_audio_dir: str | None,
     engine: str = "daft",
 ) -> None:
-    if engine == "daft":
+    if query_doc_id:
+        selected = _ann_query_lance(lance_uri, query_doc_id, top_k, where)
+    elif engine == "daft":
         rows = _read_rows_daft(lance_uri, where)
+        doc_ids = [str(x) for x in rows.get("doc_id", [])]
+        selected = [{k: v[i] for k, v in rows.items()} for i in range(min(top_k, len(doc_ids)))]
     elif engine == "lance":
         rows = _read_rows_lance(lance_uri, where)
+        doc_ids = [str(x) for x in rows.get("doc_id", [])]
+        selected = [{k: v[i] for k, v in rows.items()} for i in range(min(top_k, len(doc_ids)))]
     else:
         raise ValueError(f"unsupported query engine: {engine}")
-    doc_ids = [str(x) for x in rows.get("doc_id", [])]
 
-    if query_doc_id:
-        embeddings = _read_embeddings(lance_uri)
-        query_emb = embeddings.get(query_doc_id)
-        scored = [(doc_id, cosine_score(query_emb, embeddings.get(doc_id))) for doc_id in doc_ids if doc_id != query_doc_id]
-        keep = {doc_id for doc_id, _ in sorted(scored, key=lambda x: x[1], reverse=True)[:top_k]}
-        keep.add(query_doc_id)
-        mask = [doc_id in keep for doc_id in doc_ids]
-    else:
-        mask = [True] * len(doc_ids)
-
-    selected = []
-    for i, ok in enumerate(mask):
-        if ok:
-            selected.append({k: v[i] for k, v in rows.items()})
-
-    limit = len(selected) if query_doc_id else top_k
-    for row in selected[:limit]:
+    for row in selected:
         print(row)
 
     if export_audio_dir and selected:
         out_dir = Path(export_audio_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        blobs = read_audio_blobs(lance_uri, [row["doc_id"] for row in selected[:limit]])
+        blobs = read_audio_blobs(lance_uri, [row["doc_id"] for row in selected])
         for doc_id, blob in blobs.items():
             if blob:
                 (out_dir / f"{doc_id}.audio").write_bytes(blob)

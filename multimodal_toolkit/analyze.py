@@ -21,9 +21,19 @@ def _duration(audio_bytes: bytes | None) -> float:
     return float(info.frames) / info.samplerate if info.samplerate else 0.0
 
 
-def _suffix_from_doc(doc_id: str) -> str:
-    suffix = Path(doc_id).suffix
+def _suffix_from_url(s3_url: str) -> str:
+    suffix = Path(s3_url).suffix
     return suffix if suffix else ".wav"
+
+
+def _read_url_map(lance_uri: str) -> dict[str, str]:
+    import lance
+
+    ds = lance.dataset(lance_uri)
+    if "s3_url" not in ds.schema.names:
+        return {}
+    table = ds.scanner(columns=["doc_id", "s3_url"]).to_table()
+    return {str(doc_id): str(url) for doc_id, url in zip(table["doc_id"].to_pylist(), table["s3_url"].to_pylist(), strict=False)}
 
 
 def run(lance_uri: str, out_jsonl: str) -> None:
@@ -31,6 +41,7 @@ def run(lance_uri: str, out_jsonl: str) -> None:
 
     validate_blob_v2(lance_uri, "audio_blob")
     blobs = read_audio_blobs(lance_uri)
+    url_map = _read_url_map(lance_uri)
     asr = get_asr()
     rows: list[dict] = []
     for doc_id, audio_bytes in blobs.items():
@@ -39,7 +50,8 @@ def run(lance_uri: str, out_jsonl: str) -> None:
             asr_result = {"transcript": "", "acoustic_emotion": "NEUTRAL"}
             analysis = analyze_with_llm("", "NEUTRAL")
         else:
-            asr_result = asr.transcribe_bytes(audio_bytes, _suffix_from_doc(doc_id))
+            suffix = _suffix_from_url(url_map.get(doc_id, doc_id))
+            asr_result = asr.transcribe_bytes(audio_bytes, suffix)
             analysis = analyze_with_llm(asr_result["transcript"], asr_result["acoustic_emotion"])
 
         row = {

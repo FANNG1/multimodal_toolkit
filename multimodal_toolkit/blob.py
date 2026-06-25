@@ -102,14 +102,6 @@ def append_columns_by_doc_id(lance_uri: str, table: "pa.Table") -> None:
     }
 
     try:
-        import daft
-
-        daft.from_arrow(table).write_lance(lance_uri, mode="merge", merge_key="doc_id")
-        return
-    except Exception as exc:
-        attempts.append(EngineAttempt("daft", False, repr(exc)))
-
-    try:
         import lance_ray as lr
 
         schema = pa.schema([table.schema.field(c) for c in new_cols])

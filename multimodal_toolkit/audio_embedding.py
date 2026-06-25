@@ -48,11 +48,7 @@ class SignalEmbedder:
 
 class Wav2Vec2Embedder:
     def __init__(self) -> None:
-        from transformers import Wav2Vec2Model, Wav2Vec2Processor
-
-        self.processor = Wav2Vec2Processor.from_pretrained(config.EMBED_MODEL)
-        self.model = Wav2Vec2Model.from_pretrained(config.EMBED_MODEL)
-        self.model.eval()
+        raise RuntimeError("Wav2Vec2 backend is disabled in this POC run; use EMBED_BACKEND=signal.")
 
     def embed_bytes(self, audio_bytes: bytes | None, suffix: str = ".wav") -> list[float] | None:
         raise RuntimeError("Wav2Vec2 backend is disabled in this POC run; use EMBED_BACKEND=signal.")
