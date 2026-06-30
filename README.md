@@ -46,7 +46,7 @@ Manifest (parquet / jsonl / csv)
                 │
                 ▼  Stage 3 — workflow/index.py
                 │  lance_ray  : IVF_PQ index on audio_embedding
-                │  daft_lance : ZONEMAP index on ingest_time
+                │  pylance    : ZONEMAP index on ingest_time
                 │
                 ├──▶  Stage 4 — workflow/query.py
                 │     Daft scanner pushdown  : --where  (scalar filter)
@@ -59,12 +59,12 @@ Manifest (parquet / jsonl / csv)
 
 ### Engine assignments
 
-| Engine         | Used for                                                                              | Reason                                               |
-|----------------|---------------------------------------------------------------------------------------|------------------------------------------------------|
-| **Daft**       | manifest read, S3 download, ASR/LLM pipeline, Lance write (Stage 1 & 2), scalar query | Primary engine; stable APIs                          |
-| **lance_ray**  | IVF_PQ and ZONEMAP index creation, `compact_files`                                    | Preferred for all Lance table management; mature distributed APIs |
-| **daft_lance** | `compact_files` fallback; scalar index if lance_ray unavailable                       | Daft-first applies to data processing, not table management |
-| **pylance**    | ANN scanner (`nearest=`), row delete, `cleanup_old_versions`                          | Only option for delete and cleanup; exposes `_distance` for ANN |
+| Engine         | Used for                                                                              | Reason                                                            |
+|----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------------------|
+| **Daft**       | manifest read, S3 download, ASR/LLM pipeline, Lance write (Stage 1 & 2), scalar query | Primary engine; stable APIs                                       |
+| **lance_ray**  | IVF_PQ vector index creation, `compact_files`                                         | Preferred for Lance table management; distributed Ray workers     |
+| **pylance**    | ZONEMAP scalar index, ANN scanner (`nearest=`), row delete, `cleanup_old_versions`    | ZONEMAP: lance_ray requires unreleased code; ANN/delete: only API |
+| **daft_lance** | fallback for `compact_files` if lance_ray unavailable                                 | Not used for index; Daft-first applies to data processing only    |
 
 ## Setup
 
