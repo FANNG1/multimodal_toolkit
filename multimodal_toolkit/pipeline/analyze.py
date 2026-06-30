@@ -151,6 +151,7 @@ def run(lance_uri: str, out_jsonl: str) -> None:
                 col("prompt"),
                 provider=_provider,
                 model=config.DEEPSEEK_MODEL,
+                use_chat_completions=True,
                 response_format={"type": "json_object"},
                 temperature=0,
             ),
