@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Current File",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Python: mmt-ingest",
+      "type": "python",
+      "request": "launch",
+      "module": "multimodal_toolkit.pipeline.ingest",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Python: mmt-analyze",
+      "type": "python",
+      "request": "launch",
+      "module": "multimodal_toolkit.pipeline.analyze",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
