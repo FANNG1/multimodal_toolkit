@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    container_name: multimodal-toolkit
+    environment:
+      - UV_COMPILE_BYTECODE=1
+    volumes:
+      - .:/app
+    command: tail -f /dev/null
+
