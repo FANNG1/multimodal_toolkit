@@ -49,8 +49,9 @@ Manifest (parquet / jsonl / csv)
                 │  pylance    : ZONEMAP index on ingest_time
                 │
                 ├──▶  Stage 4 — workflow/query.py
-                │     Daft scanner pushdown  : --where  (scalar filter)
-                │     pylance scanner nearest : --vector-from  (ANN)
+                │     Daft SQL (daft.sql())   : --sql    (scalar / aggregation)
+                │     Daft scanner pushdown   : --where  (scalar filter)
+                │     pylance scanner nearest : --vector-from  (ANN, IVF index)
                 │
                 └──▶  Stage 5 — workflow/manage.py
                       pylance ds.delete()        : --before / --after
@@ -158,13 +159,24 @@ python -m multimodal_toolkit.workflow.index \
 ### Stage 4 — query
 
 ```sh
-# Scalar filter (Daft pushdown)
+# Scalar filter (Daft pushdown via read_lance default_scan_options)
 python -m multimodal_toolkit.workflow.query \
   --lance-uri s3://bucket/audio/calls.lance \
   --where "bad_tone = true OR downgrade_related = true" \
   --top-k 20
 
-# ANN vector search (pylance; exposes _distance)
+# Full Daft SQL SELECT (table name in scope: calls)
+python -m multimodal_toolkit.workflow.query \
+  --lance-uri s3://bucket/audio/calls.lance \
+  --sql "SELECT primary_reason, COUNT(*) AS cnt FROM calls GROUP BY primary_reason ORDER BY cnt DESC"
+
+# Scalar filter with projection via Daft SQL
+python -m multimodal_toolkit.workflow.query \
+  --lance-uri s3://bucket/audio/calls.lance \
+  --sql "SELECT doc_id, emotion_score, primary_reason FROM calls WHERE bad_tone = true AND emotion_score > 0.5 ORDER BY emotion_score DESC" \
+  --top-k 20
+
+# ANN vector search via pylance (uses IVF index; exposes _distance)
 python -m multimodal_toolkit.workflow.query \
   --lance-uri s3://bucket/audio/calls.lance \
   --vector-from call_001.mp3 \
