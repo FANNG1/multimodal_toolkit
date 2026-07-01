@@ -17,6 +17,16 @@ DEFAULT_COLUMNS = [
 ]
 
 
+def _rows_from_pydict(rows: dict) -> list[dict]:
+    n = len(next(iter(rows.values()), []))
+    return [{k: rows[k][i] for k in rows} for i in range(n)]
+
+
+def _doc_id_filter(doc_id: str) -> str:
+    escaped = doc_id.replace("'", "''")
+    return f"doc_id = '{escaped}'"
+
+
 def _scalar_query(lance_uri: str, where: str | None, top_k: int) -> list[dict]:
     import daft
 
@@ -27,38 +37,53 @@ def _scalar_query(lance_uri: str, where: str | None, top_k: int) -> list[dict]:
     names = set(df.schema().column_names())
     cols = [c for c in DEFAULT_COLUMNS if c in names]
     rows = df.select(*cols).limit(top_k).collect().to_pydict()
-    n = len(next(iter(rows.values()), []))
-    return [{k: rows[k][i] for k in rows} for i in range(n)]
+    return _rows_from_pydict(rows)
 
 
-def _ann_query_lance(lance_uri: str, query_doc_id: str, top_k: int, where: str | None) -> list[dict]:
-    """ANN via Lance native scanner(nearest=...).
-
-    Lance native is used intentionally: daft.read_lance hides _distance, making
-    it impossible to rank ANN results by similarity score inside Daft.
-    """
-    import lance
-
-    ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
-    query_table = ds.scanner(columns=["doc_id", "audio_embedding"], filter=f"doc_id = '{query_doc_id}'").to_table()
-    if query_table.num_rows == 0:
-        raise ValueError(f"query_doc_id not found in Lance table: {query_doc_id}")
-    query_vec = query_table["audio_embedding"][0].as_py()
-
+def _ann_query_daft(
+    lance_uri: str,
+    query_doc_id: str,
+    top_k: int,
+    where: str | None,
+    distance_range: tuple[float, float] | None,
+) -> list[dict]:
+    """ANN via Daft's Lance scanner(nearest=...)."""
+    import daft
     import pyarrow as pa
 
-    names = set(ds.schema.names)
-    cols = [c for c in DEFAULT_COLUMNS if c in names]
-    scanner_kwargs: dict = {
-        "columns": cols,
-        "nearest": {"column": "audio_embedding", "q": pa.array(query_vec, type=pa.float32()), "k": top_k},
-        "disable_scoring_autoprojection": True,
+    query_rows = (
+        daft.read_lance(
+            lance_uri,
+            io_config=daft_io_config(),
+            default_scan_options={"filter": _doc_id_filter(query_doc_id)},
+        )
+        .select("audio_embedding")
+        .limit(1)
+        .collect()
+        .to_pydict()
+    )
+    if not query_rows.get("audio_embedding"):
+        raise ValueError(f"query_doc_id not found in Lance table: {query_doc_id}")
+    query_vec = query_rows["audio_embedding"][0]
+
+    nearest: dict = {
+        "column": "audio_embedding",
+        "q": pa.array(query_vec, type=pa.float32()),
+        "k": top_k,
     }
+    if distance_range is not None:
+        nearest["distance_range"] = distance_range
+
+    scan_options: dict = {"nearest": nearest, "disable_scoring_autoprojection": True}
     if where:
-        scanner_kwargs["filter"] = where
-    table = ds.scanner(**scanner_kwargs).to_table()
-    rows = table.to_pydict()
-    return [{k: rows[k][i] for k in rows} for i in range(table.num_rows)]
+        scan_options["filter"] = where
+        scan_options["prefilter"] = True
+
+    df = daft.read_lance(lance_uri, io_config=daft_io_config(), default_scan_options=scan_options)
+    names = set(df.schema().column_names())
+    cols = [c for c in DEFAULT_COLUMNS if c in names]
+    rows = df.select(*cols).limit(top_k).collect().to_pydict()
+    return _rows_from_pydict(rows)
 
 
 def run(
@@ -67,9 +92,10 @@ def run(
     top_k: int,
     query_doc_id: str | None,
     export_audio_dir: str | None,
+    distance_range: tuple[float, float] | None = None,
 ) -> None:
     if query_doc_id:
-        selected = _ann_query_lance(lance_uri, query_doc_id, top_k, where)
+        selected = _ann_query_daft(lance_uri, query_doc_id, top_k, where, distance_range)
     else:
         selected = _scalar_query(lance_uri, where, top_k)
 
@@ -107,8 +133,15 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--query-doc-id")
     parser.add_argument("--export-audio-dir")
+    parser.add_argument("--distance-min", type=float)
+    parser.add_argument("--distance-max", type=float)
     args = parser.parse_args()
-    run(args.lance_uri, args.where, args.top_k, args.query_doc_id, args.export_audio_dir)
+    distance_range = None
+    if args.distance_min is not None or args.distance_max is not None:
+        if args.distance_min is None or args.distance_max is None:
+            parser.error("--distance-min and --distance-max must be provided together")
+        distance_range = (args.distance_min, args.distance_max)
+    run(args.lance_uri, args.where, args.top_k, args.query_doc_id, args.export_audio_dir, distance_range)
 
 
 if __name__ == "__main__":

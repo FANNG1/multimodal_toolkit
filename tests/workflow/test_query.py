@@ -132,3 +132,8 @@ def test_vector_query_missing_doc_id(lance_uri_with_embedding):
 def test_vector_query_with_where(lance_uri_with_embedding):
     rows = vector_query(lance_uri_with_embedding, "call_a", top_k=4, where="bad_tone = true")
     assert all(r["bad_tone"] for r in rows)
+
+
+def test_vector_query_with_distance_range(lance_uri_with_embedding):
+    rows = vector_query(lance_uri_with_embedding, "call_a", top_k=4, distance_range=(0.0, 0.0001))
+    assert [r["doc_id"] for r in rows] == ["call_a"]
