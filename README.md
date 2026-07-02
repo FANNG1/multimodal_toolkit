@@ -4,14 +4,8 @@ Audio call-centre analysis POC: ingest recordings from S3, store audio as Lance 
 
 ## Architecture overview
 
-Two pipeline families live in this repo:
-
-| Package | Entry points | Status |
-|---------|--------------|--------|
-| `pipeline/` | `mmt-ingest`, `mmt-analyze`, `mmt-embed`, `mmt-query` | Original POC; blobs ingested first, analysis appended in place |
-| `workflow/` | `python -m multimodal_toolkit.workflow.<step>` | Revised design; analysis runs first, blobs and metadata co-ingested in one write |
-
-The sections below describe the **workflow** design. See `pipeline/` source for the original approach.
+The toolkit uses the `workflow/` pipeline: analysis runs first, then audio blobs
+and analysis metadata are co-ingested into the Lance asset table.
 
 ## Workflow data flow
 
@@ -94,7 +88,7 @@ ASR_DEVICE=cpu          # or cuda
 MIN_DURATION_S=0
 MAX_DURATION_S=1800
 
-# Embedding backend used in Stage 1 --embed and pipeline/embed
+# Embedding backend used in Stage 1 --embed
 EMBED_BACKEND=signal    # signal (128-dim RMS+ZCR) or wav2vec2
 
 # Daft runner
@@ -208,28 +202,6 @@ python -m multimodal_toolkit.workflow.manage \
 
 Compaction and version cleanup run automatically after delete.
 
-## Usage — original pipeline (mmt-*)
-
-The `pipeline/` entry points use a different ordering: blobs are ingested first, then analysis and embeddings are appended as separate steps.
-
-```sh
-mmt-ingest  --manifest s3://bucket/audio/manifest.parquet \
-            --lance-uri /tmp/calls.lance
-
-mmt-analyze --lance-uri /tmp/calls.lance \
-            --out-jsonl /tmp/analysis.json
-
-mmt-embed   --lance-uri /tmp/calls.lance
-
-mmt-query   --lance-uri /tmp/calls.lance \
-            --where "bad_tone = true" \
-            --top-k 5
-
-mmt-query   --lance-uri /tmp/calls.lance \
-            --query-doc-id call_001.mp3 \
-            --top-k 5
-```
-
 ## Verified versions
 
 | Component | Version | Notes |
@@ -258,9 +230,6 @@ If `DEEPSEEK_API_KEY` is not set, `downgrade_related`, `bad_tone`, `primary_reas
 
 **Blob v2 is validated after every ingest.**  
 `validate_blob_v2` raises immediately if Lance silently downgraded `audio_blob` to `large_binary`. Never skip this check when testing new library versions.
-
-**Lance write-back for embeddings via daft_lance / lance-ray is deferred.**  
-`daft_lance.merge_columns_df` has correctness issues with blob v2 columns in this POC. The current `pipeline/embed.py` uses pylance `add_columns` instead. The distributed lance-ray write-back path is deferred until a newer stable release.
 
 **Local Lance URIs are verified end-to-end.**  
 S3 Lance table write/read is exercised by the underlying libraries but should be treated as a separate validation item for this POC.
