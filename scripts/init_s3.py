@@ -119,9 +119,10 @@ def main() -> None:
     if not rows:
         sys.exit(1)
     _write_manifest(rows, s3, args.bucket, args.manifest_key)
-    print(f"\n[ok] {len(rows)} file(s) uploaded. Run the pipeline with:")
-    print(f"  mmt-ingest --manifest s3://{args.bucket}/{args.manifest_key} \\")
-    print(f"             --lance-uri s3://{args.bucket}/audio_poc/calls.lance")
+    print(f"\n[ok] {len(rows)} file(s) uploaded. Start the workflow with:")
+    print("  python -m multimodal_toolkit.workflow.analyze \\")
+    print(f"    --manifest s3://{args.bucket}/{args.manifest_key} \\")
+    print(f"    --out s3://{args.bucket}/audio_poc/analysis.jsonl")
 
 
 if __name__ == "__main__":
