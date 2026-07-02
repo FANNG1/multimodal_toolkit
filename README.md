@@ -45,7 +45,7 @@ Manifest (parquet / jsonl / csv)
                 ├──▶  Stage 4 — workflow/query.py
                 │     Daft SQL (daft.sql())   : --sql    (scalar / aggregation)
                 │     Daft scanner pushdown   : --where  (scalar filter)
-                │     pylance scanner nearest : --vector-from  (ANN, IVF index)
+                │     Daft scanner nearest    : --vector-from  (ANN, IVF index)
                 │
                 └──▶  Stage 5 — workflow/manage.py
                       pylance ds.delete()        : --before / --after
@@ -56,9 +56,9 @@ Manifest (parquet / jsonl / csv)
 
 | Engine         | Used for                                                                              | Reason                                                            |
 |----------------|---------------------------------------------------------------------------------------|-------------------------------------------------------------------|
-| **Daft**       | manifest read, S3 download, ASR/LLM pipeline, Lance write (Stage 1 & 2), scalar query | Primary engine; stable APIs                                       |
+| **Daft**       | manifest read, S3 download, ASR/LLM pipeline, Lance write (Stage 1 & 2), scalar and ANN query | Primary engine; stable APIs                                |
 | **lance_ray**  | IVF_PQ vector index creation, `compact_files`                                         | Preferred for Lance table management; distributed Ray workers     |
-| **pylance**    | ZONEMAP scalar index, ANN scanner (`nearest=`), row delete, `cleanup_old_versions`    | ZONEMAP: lance_ray requires unreleased code; ANN/delete: only API |
+| **pylance**    | ZONEMAP scalar index, row delete, `cleanup_old_versions`                              | ZONEMAP: lance_ray requires unreleased code; delete: only API     |
 | **daft_lance** | fallback for `compact_files` if lance_ray unavailable                                 | Not used for index; Daft-first applies to data processing only    |
 
 ## Setup
@@ -170,7 +170,7 @@ python -m multimodal_toolkit.workflow.query \
   --sql "SELECT doc_id, emotion_score, primary_reason FROM calls WHERE bad_tone = true AND emotion_score > 0.5 ORDER BY emotion_score DESC" \
   --top-k 20
 
-# ANN vector search via pylance (uses IVF index; exposes _distance)
+# ANN vector search via Daft Lance scanner (uses IVF index)
 python -m multimodal_toolkit.workflow.query \
   --lance-uri s3://bucket/audio/calls.lance \
   --vector-from call_001.mp3 \
@@ -181,6 +181,8 @@ python -m multimodal_toolkit.workflow.query \
   --lance-uri s3://bucket/audio/calls.lance \
   --vector-from call_001.mp3 \
   --where "downgrade_related = true" \
+  --distance-min 0.0 \
+  --distance-max 1.0 \
   --top-k 10
 ```
 
