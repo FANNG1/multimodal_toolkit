@@ -24,3 +24,4 @@ __pycache__/
 /data/images/*.png
 /data/images/*.bmp
 /data/images/*.webp
+.coverage
