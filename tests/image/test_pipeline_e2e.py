@@ -167,13 +167,13 @@ def test_query_sql_status_breakdown(pipeline):
 # Stage 5 — manage (runs last: mutates the table)
 # ---------------------------------------------------------------------------
 
-def test_zz_manage_delete_by_date(pipeline):
+def test_zz_manage_delete_by_date(pipeline, local_ray):
     import lance
 
     from multimodal_toolkit.workflow.manage import delete_by_date
 
     # All rows share one ingest stamp; a past bound deletes nothing but still
-    # exercises the delete + compact + cleanup path.
+    # exercises the delete + compact + cleanup path (on a real blob v2 table).
     delete_by_date(pipeline["lance_uri"], before="1970-01-01")
     assert lance.dataset(pipeline["lance_uri"]).count_rows() == 5
 
