@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Upload local audio files to MinIO/S3 and write the manifest.
+"""Upload local media files to MinIO/S3 and write the manifest.
 
 Usage:
     python scripts/init_s3.py
     python scripts/init_s3.py --data-dir data/audio --bucket contacts \
         --raw-prefix raw/calls --manifest-key audio_poc/manifest.parquet
+    python scripts/init_s3.py --media image --data-dir data/images \
+        --raw-prefix raw/images --manifest-key image_poc/manifest.parquet
 
-Place .wav / .mp3 / .m4a / .flac / .ogg files in data/audio/ before running.
+Place .wav / .mp3 / .m4a / .flac / .ogg files in data/audio/ (or image files
+when using --media image) before running.
 The manifest is written to s3://<bucket>/<manifest-key> in Parquet format.
 
 Dependencies: pyarrow (already required by the project), python-dotenv (optional).
@@ -19,6 +22,7 @@ import sys
 from pathlib import Path
 
 AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -66,10 +70,10 @@ def _ensure_bucket(s3, bucket: str) -> None:
         print(f"[exists]  bucket: {bucket}")
 
 
-def _upload_files(s3, data_dir: Path, bucket: str, prefix: str) -> list[dict]:
-    files = sorted(f for f in data_dir.iterdir() if f.suffix.lower() in AUDIO_SUFFIXES)
+def _upload_files(s3, data_dir: Path, bucket: str, prefix: str, suffixes: set[str]) -> list[dict]:
+    files = sorted(f for f in data_dir.iterdir() if f.suffix.lower() in suffixes)
     if not files:
-        print(f"[warn] no audio files found in {data_dir}", file=sys.stderr)
+        print(f"[warn] no media files found in {data_dir}", file=sys.stderr)
         return []
 
     rows = []
@@ -98,9 +102,10 @@ def _write_manifest(rows: list[dict], s3, bucket: str, manifest_key: str) -> Non
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--data-dir", default="data/audio", help="Local directory with audio files")
+    parser.add_argument("--media", choices=("audio", "image"), default="audio", help="Media type to upload")
+    parser.add_argument("--data-dir", default="data/audio", help="Local directory with media files")
     parser.add_argument("--bucket", default="contacts", help="S3 bucket name")
-    parser.add_argument("--raw-prefix", default="raw/calls", help="S3 prefix for audio files")
+    parser.add_argument("--raw-prefix", default="raw/calls", help="S3 prefix for media files")
     parser.add_argument("--manifest-key", default="audio_poc/manifest.parquet", help="S3 key for the manifest")
     args = parser.parse_args()
 
@@ -114,15 +119,22 @@ def main() -> None:
 
     s3 = _s3fs(_s3_config())
 
+    suffixes = IMAGE_SUFFIXES if args.media == "image" else AUDIO_SUFFIXES
+
     _ensure_bucket(s3, args.bucket)
-    rows = _upload_files(s3, data_dir, args.bucket, args.raw_prefix)
+    rows = _upload_files(s3, data_dir, args.bucket, args.raw_prefix, suffixes)
     if not rows:
         sys.exit(1)
     _write_manifest(rows, s3, args.bucket, args.manifest_key)
     print(f"\n[ok] {len(rows)} file(s) uploaded. Start the workflow with:")
-    print("  python -m multimodal_toolkit.workflow.analyze \\")
-    print(f"    --manifest s3://{args.bucket}/{args.manifest_key} \\")
-    print(f"    --out s3://{args.bucket}/audio_poc/analysis.jsonl")
+    if args.media == "image":
+        print("  python -m multimodal_toolkit.image.workflow.analyze \\")
+        print(f"    --manifest s3://{args.bucket}/{args.manifest_key} \\")
+        print(f"    --out s3://{args.bucket}/image_poc/analysis.jsonl")
+    else:
+        print("  python -m multimodal_toolkit.workflow.analyze \\")
+        print(f"    --manifest s3://{args.bucket}/{args.manifest_key} \\")
+        print(f"    --out s3://{args.bucket}/audio_poc/analysis.jsonl")
 
 
 if __name__ == "__main__":

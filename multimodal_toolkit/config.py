@@ -39,6 +39,17 @@ EMBED_BACKEND = os.getenv("EMBED_BACKEND", "signal")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "facebook/wav2vec2-base")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "128"))
 
+# Image scenario: face detection (InsightFace SCRFD) + clarity (Laplacian variance)
+INSIGHTFACE_MODEL = os.getenv("INSIGHTFACE_MODEL", "buffalo_l")
+INSIGHTFACE_ROOT = os.getenv("INSIGHTFACE_ROOT", "")  # "" = insightface default ~/.insightface
+FACE_DET_SIZE = int(os.getenv("FACE_DET_SIZE", "640"))
+FACE_DET_THRESH = float(os.getenv("FACE_DET_THRESH", "0.3"))
+IMAGE_LONG_EDGE = int(os.getenv("IMAGE_LONG_EDGE", "1024"))
+FACE_DET_SCORE_MIN = float(os.getenv("FACE_DET_SCORE_MIN", "0.5"))
+MIN_FACE_RATIO = float(os.getenv("MIN_FACE_RATIO", "0.01"))
+BLUR_THRESHOLD = float(os.getenv("BLUR_THRESHOLD", "100.0"))
+FACE_BLUR_THRESHOLD = float(os.getenv("FACE_BLUR_THRESHOLD", "80.0"))
+
 USE_RAY = os.getenv("USE_RAY", "0").lower() in ("1", "true", "yes")
 RAY_ADDRESS = os.getenv("RAY_ADDRESS") or None  # None = start/join local Ray
 

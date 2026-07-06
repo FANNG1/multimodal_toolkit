@@ -1,5 +1,12 @@
 """Stage 1: manifest → analysis tags (+ optional embedding) → S3 output.
 
+Flow: download each recording → duration gate → ASR (speech-to-text via
+SenseVoice, which also labels the speaker's acoustic emotion from tone of
+voice) → redact PII from the transcript → DeepSeek LLM reads the transcript
+and tags business fields (downgrade intent, complaint reason, emotion, ...)
+as JSON → optionally append an acoustic embedding (a fixed-length vector
+summarizing how the audio *sounds*, used later for similarity search).
+
 Output format depends on --embed flag:
   default (no embed)  →  JSONL on S3  (scalar fields, embeddable in downstream JSON pipelines)
   --embed             →  Lance staging table on S3  (fixed-size vector cannot be stored in JSON)
@@ -16,14 +23,16 @@ from daft.functions import download, regexp_replace
 from daft.functions.ai import prompt as llm_prompt
 
 from .. import config
-from ..pipeline.analyze import (
-    _ANALYSIS_DTYPE,
-    _AsrUDF,
-    _duration_udf,
-    _prompt_udf,
+from ..audio.udfs import (
+    ANALYSIS_DTYPE,
+    AsrUDF,
+    duration_udf,
+    prompt_udf,
 )
 from ..storage.io import configure_daft_runner, daft_io_config, read_manifest
 
+# PII patterns (Chinese mainland): 18-digit resident ID and 11-digit mobile
+# number. Redacted from transcripts before they are sent to the LLM or stored.
 _ID_CARD_PAT = r"\d{17}[\dXx]"
 _PHONE_PAT = r"1[3-9]\d{9}"
 
@@ -46,7 +55,15 @@ _BASE_OUTPUT_COLS = [
 
 @daft.cls(cpus=1)
 class _EmbedUDF:
+    """Turns raw audio into a fixed-length float vector (the "embedding").
+
+    Recordings that sound alike get vectors that are close together, which is
+    what makes nearest-neighbour search in Stage 4 possible. The backend
+    (config.EMBED_BACKEND) is either cheap signal statistics or wav2vec2.
+    """
+
     def __init__(self) -> None:
+        # Loaded once per worker process, not per row (same pattern as AsrUDF).
         from multimodal_toolkit.audio.embedding import get_embedder
 
         self._embedder = get_embedder()
@@ -69,17 +86,22 @@ def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
     )
     df = df.where(~col("audio_bytes").is_null())
 
-    df = df.with_column("duration_s", _duration_udf(col("audio_bytes")))
+    # Duration gate: drop clips too short to analyse or too long to afford.
+    df = df.with_column("duration_s", duration_udf(col("audio_bytes")))
     df = df.where(
         (col("duration_s") >= config.MIN_DURATION_S)
         & (col("duration_s") <= config.MAX_DURATION_S)
     )
 
-    asr = _AsrUDF()
+    # ASR = automatic speech recognition. SenseVoice returns the transcript
+    # plus an acoustic emotion label (angry/sad/... inferred from tone, not words).
+    asr = AsrUDF()
     df = df.with_column("asr", asr(col("audio_bytes"), col("doc_id")))
     df = df.with_column("transcript_raw", col("asr")["transcript"])
     df = df.with_column("acoustic_emotion", col("asr")["acoustic_emotion"])
 
+    # Redact PII before the transcript leaves this stage. ID card first: a
+    # phone-number match inside an ID number would otherwise break it apart.
     df = df.with_column(
         "transcript",
         regexp_replace(col("transcript_raw"), _ID_CARD_PAT, "[ID_REDACTED]"),
@@ -89,7 +111,10 @@ def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
         regexp_replace(col("transcript"), _PHONE_PAT, "[PHONE_REDACTED]"),
     )
 
-    df = df.with_column("prompt", _prompt_udf(col("transcript"), col("acoustic_emotion")))
+    # LLM tagging: build the instruction (audio/prompt.py), ask DeepSeek for a
+    # JSON object with the business fields. Skipped when no API key is set —
+    # those columns then fall back to the fill_null defaults below.
+    df = df.with_column("prompt", prompt_udf(col("transcript"), col("acoustic_emotion")))
     if config.DEEPSEEK_API_KEY:
         from daft.ai.openai.provider import OpenAIProvider
 
@@ -111,7 +136,10 @@ def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
     else:
         df = df.with_column("analysis_json", daft.lit(None).cast(daft.DataType.string()))
 
-    df = df.with_column("analysis", col("analysis_json").try_deserialize("json", _ANALYSIS_DTYPE))
+    # Parse the LLM's JSON into typed columns. try_deserialize yields null on
+    # malformed JSON, and fill_null supplies a safe default per field, so one
+    # bad LLM response never fails the batch.
+    df = df.with_column("analysis", col("analysis_json").try_deserialize("json", ANALYSIS_DTYPE))
     df = (
         df.with_column("downgrade_related", col("analysis")["downgrade_related"].fill_null(False))
         .with_column("primary_reason", col("analysis")["primary_reason"].fill_null("其他"))
