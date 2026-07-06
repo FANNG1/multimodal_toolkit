@@ -40,11 +40,24 @@ def delete_by_date(
     ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
     ds.delete(filter_str)
 
-    # compact: lance_ray (preferred for table management)
-    lance_ray.compact_files(lance_uri, storage_options=lance_storage_options(lance_uri))
-    ds.cleanup_old_versions()
     print(f"[ok] deleted rows where: {filter_str}")
-    print(f"[ok] compacted: {lance_uri}")
+
+    # compact: lance_ray (preferred for table management), best-effort.
+    # compaction_options must be an explicit dict: lance_ray 0.4.x passes the
+    # default None straight into Compaction.plan(), which rejects it.
+    # Known limitation: tables with blob v2 columns (the asset tables) cannot
+    # be compacted with current lance versions — the deletion above still
+    # succeeds, so a compaction failure must not fail the whole operation.
+    try:
+        lance_ray.compact_files(
+            lance_uri,
+            compaction_options={},
+            storage_options=lance_storage_options(lance_uri),
+        )
+        print(f"[ok] compacted: {lance_uri}")
+    except Exception as exc:
+        print(f"[warn] compaction skipped (rows are deleted, table not compacted): {exc}")
+    ds.cleanup_old_versions()
 
 
 def main() -> None:

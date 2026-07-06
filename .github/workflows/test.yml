@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # SCRFD-dependent tests skip themselves when the model pack is absent,
+      # so no model download is needed in CI. Ray-dependent tests are
+      # excluded by default (pyproject addopts) and run in the non-blocking
+      # step below.
+      - name: Run tests
+        run: uv run pytest tests/ -q
+
+      - name: Run Ray integration tests (non-blocking)
+        run: uv run pytest tests/ -q -m ray
+        continue-on-error: true

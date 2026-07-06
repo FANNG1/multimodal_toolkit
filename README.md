@@ -315,3 +315,9 @@ If `DEEPSEEK_API_KEY` is not set, `downgrade_related`, `bad_tone`, `primary_reas
 
 **Local Lance URIs are verified end-to-end.**  
 S3 Lance table write/read is exercised by the underlying libraries but should be treated as a separate validation item for this POC.
+
+**Blob v2 asset tables cannot be compacted.**  
+Compaction of tables containing blob v2 columns fails inside lance's decoder with
+current versions (pylance 7.x / lance-ray 0.4.x), regardless of engine. Stage 5
+deletes rows and cleans up old versions normally, but logs a `[warn]` and skips
+compaction on such tables. Plain tables (no blob columns) compact fine.

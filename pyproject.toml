@@ -25,6 +25,12 @@ dependencies = [
   "transformers",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+  "ray: hard dependency on a local Ray cluster; excluded by default, run with `pytest -m ray`",
+]
+addopts = "-m 'not ray'"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

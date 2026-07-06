@@ -5,20 +5,13 @@ Skipped unless the model is already available locally (no network download in CI
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
-from multimodal_toolkit import config
-
-
-def _model_dir() -> Path:
-    root = Path(config.INSIGHTFACE_ROOT) if config.INSIGHTFACE_ROOT else Path.home() / ".insightface"
-    return root / "models" / config.INSIGHTFACE_MODEL
-
+from .conftest import scrfd_model_available
 
 pytestmark = pytest.mark.skipif(
-    not _model_dir().exists() or os.getenv("SKIP_DETECTOR_TESTS"),
+    not scrfd_model_available() or os.getenv("SKIP_DETECTOR_TESTS"),
     reason="InsightFace model pack not available locally",
 )
 
