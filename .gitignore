@@ -16,3 +16,11 @@ __pycache__/
 /data/audio/*.flac
 /data/audio/*.ogg
 
+.idea/
+
+# local image samples — uploaded via scripts/init_s3.py --media image, not to git
+/data/images/*.jpg
+/data/images/*.jpeg
+/data/images/*.png
+/data/images/*.bmp
+/data/images/*.webp

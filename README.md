@@ -2,6 +2,8 @@
 
 Audio call-centre analysis POC: ingest recordings from S3, store audio as Lance blob v2, transcribe with SenseVoice, analyse with DeepSeek, append acoustic embeddings, and query by scalar filter or nearest-neighbour.
 
+Also includes an image analysis workflow (face presence + clarity detection), fully isolated from the audio pipeline — see [Image workflow](#image-workflow) below.
+
 ## Architecture overview
 
 The toolkit uses the `workflow/` pipeline: analysis runs first, then audio blobs
@@ -203,6 +205,84 @@ python -m multimodal_toolkit.workflow.manage \
 ```
 
 Compaction and version cleanup run automatically after delete.
+
+## Image workflow
+
+Image analysis lives in `multimodal_toolkit/image/` and is fully isolated from the audio
+pipeline (own workflow entry points, own Lance asset table) so the two can evolve independently.
+Stage 3 (index) and Stage 5 (manage) are media-agnostic and shared.
+
+v1 detections, all local (no VLM/API):
+
+| Detection | Method | Output columns |
+|-----------|--------|----------------|
+| Face presence | InsightFace SCRFD (`buffalo_l`, detection module only, CPU) | `face_count`, `face_score`, `face_area_ratio`, `has_face` |
+| Clarity / blur | OpenCV Laplacian variance on the image resized to `IMAGE_LONG_EDGE` (whole image + largest-face crop) | `blur_score`, `face_blur_score`, `is_blurry`, `is_face_blurry` |
+
+All face-derived metrics (`face_score`, `face_area_ratio`, `face_blur_score`) come from
+the same face — the largest one — so the rule engine's AND conditions always judge a
+single face rather than mixing metrics from different detections.
+
+Boolean verdicts are derived from raw scores by a threshold rule engine
+(`image/rules.py`); both raw scores and verdicts are persisted, so thresholds can be
+re-tuned via SQL without re-running the models. The lower bound for such retuning is
+the detector's own coarse filter `FACE_DET_THRESH` (default 0.3) — faces below it never
+reach the table.
+
+Every manifest entry produces exactly one output row. Failed items are kept with a
+`status` column (`ok` / `download_failed` / `decode_failed`), null scores, and null
+verdicts — "unknown" stays distinguishable from "judged no", and unreadable images are
+themselves a reportable compliance signal.
+
+Environment variables (all optional):
+
+```sh
+INSIGHTFACE_MODEL=buffalo_l   # insightface model pack
+INSIGHTFACE_ROOT=             # pre-baked model dir for offline/container use ("" = ~/.insightface)
+FACE_DET_SIZE=640             # SCRFD detection input size
+FACE_DET_THRESH=0.3           # SCRFD coarse filter; keep well below FACE_DET_SCORE_MIN
+IMAGE_LONG_EDGE=1024          # resize long edge before detection/blur (never upscales)
+FACE_DET_SCORE_MIN=0.5        # min det score (of the largest face) for has_face
+MIN_FACE_RATIO=0.01           # min face-area / image-area for has_face
+BLUR_THRESHOLD=100.0          # blur_score below this → is_blurry
+FACE_BLUR_THRESHOLD=80.0      # face_blur_score below this → is_face_blurry
+```
+
+The first run downloads the SCRFD model pack (~280 MB) to `~/.insightface`; set
+`INSIGHTFACE_ROOT` to a pre-populated directory to skip the download.
+
+```sh
+# Seed images and write the manifest
+python scripts/init_s3.py --media image --data-dir data/images \
+  --raw-prefix raw/images --manifest-key image_poc/manifest.parquet
+
+# Stage 1 — analyze (face presence + clarity scores + rule verdicts → JSONL)
+python -m multimodal_toolkit.image.workflow.analyze \
+  --manifest s3://contacts/image_poc/manifest.parquet \
+  --out      s3://contacts/image_poc/analysis.jsonl
+
+# Stage 2 — ingest (image blobs + analysis metadata → Lance image asset table)
+python -m multimodal_toolkit.image.workflow.ingest \
+  --analysis  s3://contacts/image_poc/analysis.jsonl \
+  --lance-uri s3://contacts/image_poc/assets.lance
+
+# Stage 3 — index (shared entry point; image tables have no embedding in v1)
+python -m multimodal_toolkit.workflow.index \
+  --lance-uri s3://contacts/image_poc/assets.lance --no-embedding
+
+# Stage 4 — query (table name in SQL scope: images)
+python -m multimodal_toolkit.image.workflow.query \
+  --lance-uri s3://contacts/image_poc/assets.lance \
+  --where "has_face = true AND is_blurry = false"
+
+python -m multimodal_toolkit.image.workflow.query \
+  --lance-uri s3://contacts/image_poc/assets.lance \
+  --sql "SELECT doc_id, blur_score, face_count FROM images ORDER BY blur_score ASC"
+
+# Stage 5 — manage (shared entry point)
+python -m multimodal_toolkit.workflow.manage \
+  --lance-uri s3://contacts/image_poc/assets.lance --before 2025-01-01
+```
 
 ## Verified versions
 
