@@ -225,6 +225,7 @@ v1 detections, all local (no VLM/API):
 |-----------|--------|----------------|
 | Face presence | InsightFace SCRFD (`buffalo_l`, detection module only, CPU) | `face_count`, `face_score`, `face_area_ratio`, `has_face` |
 | Clarity / blur | OpenCV Laplacian variance on the image resized to `IMAGE_LONG_EDGE` (whole image + largest-face crop) | `blur_score`, `face_blur_score`, `is_blurry`, `is_face_blurry` |
+| Text/image similarity | ChineseCLIP (`OFA-Sys/chinese-clip-vit-base-patch16`) | `image_embedding` |
 
 All face-derived metrics (`face_score`, `face_area_ratio`, `face_blur_score`) come from
 the same face — the largest one — so the rule engine's AND conditions always judge a
@@ -253,10 +254,14 @@ FACE_DET_SCORE_MIN=0.5        # min det score (of the largest face) for has_face
 MIN_FACE_RATIO=0.01           # min face-area / image-area for has_face
 BLUR_THRESHOLD=100.0          # blur_score below this → is_blurry
 FACE_BLUR_THRESHOLD=80.0      # face_blur_score below this → is_face_blurry
+IMAGE_EMBED_MODEL=OFA-Sys/chinese-clip-vit-base-patch16
+IMAGE_EMBED_DEVICE=cpu
+IMAGE_EMBED_DIM=512
 ```
 
-The first run downloads the SCRFD model pack (~280 MB) to `~/.insightface`; set
-`INSIGHTFACE_ROOT` to a pre-populated directory to skip the download.
+The first detection run downloads the SCRFD model pack (~280 MB) to `~/.insightface`; set
+`INSIGHTFACE_ROOT` to a pre-populated directory to skip the download. The first
+`--embed` run downloads the ChineseCLIP model via Transformers cache.
 
 ```sh
 # Seed images and write the manifest
@@ -268,14 +273,23 @@ python -m multimodal_toolkit.image.workflow.analyze \
   --manifest s3://contacts/image_poc/manifest.parquet \
   --out      s3://contacts/image_poc/analysis.jsonl
 
+# Stage 1 with embeddings — required for text-to-image and image similarity search
+python -m multimodal_toolkit.image.workflow.analyze \
+  --manifest s3://contacts/image_poc/manifest.parquet \
+  --out      s3://contacts/image_poc/staging.lance \
+  --embed
+
 # Stage 2 — ingest (image blobs + analysis metadata → Lance image asset table)
 python -m multimodal_toolkit.image.workflow.ingest \
   --analysis  s3://contacts/image_poc/analysis.jsonl \
   --lance-uri s3://contacts/image_poc/assets.lance
 
-# Stage 3 — index (shared entry point; image tables have no embedding in v1)
+# Pass the .lance staging URI if Stage 1 was run with --embed.
+
+# Stage 3 — index for text/image similarity search
 python -m multimodal_toolkit.workflow.index \
-  --lance-uri s3://contacts/image_poc/assets.lance --no-embedding
+  --lance-uri s3://contacts/image_poc/assets.lance \
+  --embedding-column image_embedding
 
 # Stage 4 — query (table name in SQL scope: images)
 python -m multimodal_toolkit.image.workflow.query \
@@ -285,6 +299,21 @@ python -m multimodal_toolkit.image.workflow.query \
 python -m multimodal_toolkit.image.workflow.query \
   --lance-uri s3://contacts/image_poc/assets.lance \
   --sql "SELECT doc_id, blur_score, face_count FROM images ORDER BY blur_score ASC"
+
+# Text-to-image search
+python -m multimodal_toolkit.image.workflow.query \
+  --lance-uri s3://contacts/image_poc/assets.lance \
+  --text "头像" \
+  --where "status = 'ok'"
+
+# Image similarity search from a local file or an existing table row
+python -m multimodal_toolkit.image.workflow.query \
+  --lance-uri s3://contacts/image_poc/assets.lance \
+  --image-path ./query.jpg
+
+python -m multimodal_toolkit.image.workflow.query \
+  --lance-uri s3://contacts/image_poc/assets.lance \
+  --image-from face_001.jpg
 
 # Stage 5 — manage (shared entry point)
 python -m multimodal_toolkit.workflow.manage \

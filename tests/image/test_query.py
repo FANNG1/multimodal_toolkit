@@ -8,7 +8,13 @@ import lance
 import pyarrow as pa
 import pytest
 
-from multimodal_toolkit.image.workflow.query import scalar_query, sql_query
+from multimodal_toolkit.image.workflow.query import (
+    image_doc_query,
+    image_path_query,
+    scalar_query,
+    sql_query,
+    text_query,
+)
 
 ROWS = {
     "doc_id": ["img_a", "img_b", "img_c", "img_d", "img_bad"],
@@ -72,3 +78,65 @@ def test_sql_query_aggregation(lance_uri):
 def test_sql_query_status_filter(lance_uri):
     rows = sql_query(lance_uri, "SELECT doc_id, status FROM images WHERE status != 'ok'")
     assert [r["doc_id"] for r in rows] == ["img_bad"]
+
+
+@pytest.fixture()
+def lance_uri_with_embedding() -> str:
+    uri = str(pathlib.Path(tempfile.mkdtemp()) / "test_images_emb.lance")
+    dim = 4
+    embeddings = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.9, 0.1, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        None,
+    ]
+    tbl = pa.table(
+        {
+            **ROWS,
+            "image_embedding": pa.array(embeddings, type=pa.list_(pa.float32(), dim)),
+        }
+    )
+    lance.write_dataset(tbl, uri)
+    return uri
+
+
+class _FakeImageEmbedder:
+    def embed_text(self, text):
+        if not text:
+            return None
+        return [0.0, 1.0, 0.0, 0.0]
+
+    def embed_image_bytes(self, image_bytes):
+        if not image_bytes:
+            return None
+        return [1.0, 0.0, 0.0, 0.0]
+
+
+def test_text_query(monkeypatch, lance_uri_with_embedding):
+    import multimodal_toolkit.image.embedding as embedding
+
+    monkeypatch.setattr(embedding, "get_embedder", lambda: _FakeImageEmbedder())
+    rows = text_query(lance_uri_with_embedding, "头像", top_k=2)
+    assert len(rows) == 2
+    assert rows[0]["doc_id"] in {"img_b", "img_c"}
+
+
+def test_image_path_query(monkeypatch, tmp_path, lance_uri_with_embedding):
+    import multimodal_toolkit.image.embedding as embedding
+
+    monkeypatch.setattr(embedding, "get_embedder", lambda: _FakeImageEmbedder())
+    query_path = tmp_path / "query.jpg"
+    query_path.write_bytes(b"fake image bytes")
+    rows = image_path_query(lance_uri_with_embedding, str(query_path), top_k=1, where="status = 'ok'")
+    assert [r["doc_id"] for r in rows] == ["img_a"]
+
+
+def test_image_doc_query(lance_uri_with_embedding):
+    rows = image_doc_query(lance_uri_with_embedding, "img_a", top_k=1, where="status = 'ok'")
+    assert [r["doc_id"] for r in rows] == ["img_a"]
+
+
+def test_image_doc_query_null_embedding(lance_uri_with_embedding):
+    with pytest.raises(ValueError, match="null image_embedding"):
+        image_doc_query(lance_uri_with_embedding, "img_bad")

@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import argparse
 
+import daft
 from daft import col
 from daft.functions import download, when
 
+from .. import config
 from ...storage.io import configure_daft_runner, daft_io_config, read_manifest
 from ..rules import add_rule_columns
 from ..udfs import ImageQualityUDF
@@ -53,9 +55,30 @@ _SCORE_FIELDS = [
 ]
 
 
-def run(manifest: str, out_path: str) -> None:
+@daft.cls(cpus=1)
+class _ImageEmbedUDF:
+    def __init__(self) -> None:
+        from multimodal_toolkit.image.embedding import get_embedder
+
+        self._embedder = get_embedder()
+
+    @daft.method.batch(
+        return_dtype=daft.DataType.fixed_size_list(daft.DataType.float32(), config.IMAGE_EMBED_DIM)
+    )
+    def __call__(self, image_bytes_col, status_col):
+        return [
+            self._embedder.embed_image_bytes(image_bytes) if status == "ok" and image_bytes else None
+            for image_bytes, status in zip(image_bytes_col.to_pylist(), status_col.to_pylist())
+        ]
+
+
+def run(manifest: str, out_path: str, embed: bool = False) -> None:
     configure_daft_runner()
     io_config = daft_io_config()
+
+    low_out = out_path.rstrip("/").lower()
+    if embed and (low_out.endswith(".json") or low_out.endswith(".jsonl") or low_out.endswith(".ndjson")):
+        raise ValueError("--embed writes a Lance staging table; use a .lance output URI")
 
     # manifest 只有 doc_id + s3_url 两列；按 s3_url 下载图片字节，
     # 失败的行 image_bytes 为 null（on_error="null"），保留不丢。
@@ -85,17 +108,25 @@ def run(manifest: str, out_path: str) -> None:
     # 非 ok 行的结论为 null。
     df = add_rule_columns(df)
 
-    output = df.select(*_OUTPUT_COLS)
-    output.write_json(out_path, write_mode="overwrite", io_config=io_config)
-    print(f"[ok] wrote image analysis JSONL: {out_path}")
+    if embed:
+        embed_udf = _ImageEmbedUDF()
+        df = df.with_column("image_embedding", embed_udf(col("image_bytes"), col("status")))
+        output = df.select(*_OUTPUT_COLS, "image_embedding")
+        output.write_lance(out_path, mode="overwrite", io_config=io_config)
+        print(f"[ok] wrote image analysis+embedding lance staging table: {out_path}")
+    else:
+        output = df.select(*_OUTPUT_COLS)
+        output.write_json(out_path, write_mode="overwrite", io_config=io_config)
+        print(f"[ok] wrote image analysis JSONL: {out_path}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, help="parquet/jsonl/csv manifest with doc_id, s3_url")
-    parser.add_argument("--out", required=True, help="S3 output .jsonl path")
+    parser.add_argument("--out", required=True, help="S3 output .jsonl path or .lance URI when --embed")
+    parser.add_argument("--embed", action="store_true", help="compute image_embedding (output becomes lance table)")
     args = parser.parse_args()
-    run(args.manifest, args.out)
+    run(args.manifest, args.out, embed=args.embed)
 
 
 if __name__ == "__main__":

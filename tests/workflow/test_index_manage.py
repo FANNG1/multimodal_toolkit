@@ -99,8 +99,7 @@ def test_build_time_index(lance_uri):
     assert any(idx["fields"] == ["ingest_time"] for idx in indices)
 
 
-@pytest.mark.ray
-def test_build_embedding_index_small_table(lance_uri, local_ray):
+def test_build_embedding_index_small_table(lance_uri):
     # Small-table parameters recommended by index.py's own docstring.
     build_embedding_index(lance_uri, num_partitions=1, sample_rate=2, index_type="IVF_FLAT")
     indices = lance.dataset(lance_uri).list_indices()
@@ -110,6 +109,11 @@ def test_build_embedding_index_small_table(lance_uri, local_ray):
 def test_build_embedding_index_missing_column(lance_uri_no_embedding):
     with pytest.raises(ValueError, match="audio_embedding column not found"):
         build_embedding_index(lance_uri_no_embedding)
+
+
+def test_build_embedding_index_missing_custom_column(lance_uri_no_embedding):
+    with pytest.raises(ValueError, match="image_embedding column not found"):
+        build_embedding_index(lance_uri_no_embedding, column="image_embedding")
 
 
 # ---------------------------------------------------------------------------
