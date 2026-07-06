@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 
-from ..storage.io import daft_io_config
+from ...storage.io import daft_io_config
 
 DEFAULT_COLUMNS = [
     "doc_id",
@@ -96,7 +96,7 @@ def vector_query(
         .collect()
         .to_pydict()
     )
-    if not query_rows.get("audio_embedding"):
+    if not query_rows.get("audio_embedding") or query_rows["audio_embedding"][0] is None:
         raise ValueError(f"query_doc_id not found: {query_doc_id}")
     q_vec = query_rows["audio_embedding"][0]
 

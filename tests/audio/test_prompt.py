@@ -1,8 +1,8 @@
 """Tests for audio/prompt.py — LLM instruction builder."""
 from __future__ import annotations
 
-from multimodal_toolkit import config
 from multimodal_toolkit.audio.prompt import build_prompt
+from multimodal_toolkit.audio import config
 
 
 def test_prompt_contains_transcript_and_emotion():

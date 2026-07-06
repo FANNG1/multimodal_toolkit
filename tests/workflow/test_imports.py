@@ -6,7 +6,7 @@ from __future__ import annotations
 
 
 def test_audio_analyze_importable():
-    from multimodal_toolkit.workflow.analyze import run  # noqa: F401
+    from multimodal_toolkit.audio.workflow.analyze import run  # noqa: F401
 
 
 def test_image_workflow_importable():

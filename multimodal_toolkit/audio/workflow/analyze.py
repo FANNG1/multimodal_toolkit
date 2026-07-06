@@ -23,13 +23,13 @@ from daft.functions import download, regexp_replace
 from daft.functions.ai import prompt as llm_prompt
 
 from .. import config
-from ..audio.udfs import (
+from ..udfs import (
     ANALYSIS_DTYPE,
     AsrUDF,
     duration_udf,
     prompt_udf,
 )
-from ..storage.io import configure_daft_runner, daft_io_config, read_manifest
+from ...storage.io import configure_daft_runner, daft_io_config, read_manifest
 
 # PII patterns (Chinese mainland): 18-digit resident ID and 11-digit mobile
 # number. Redacted from transcripts before they are sent to the LLM or stored.

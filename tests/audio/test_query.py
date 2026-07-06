@@ -1,4 +1,4 @@
-"""Tests for workflow/query.py — runs against a temporary local lance table."""
+"""Tests for audio/workflow/query.py — runs against a temporary local lance table."""
 from __future__ import annotations
 
 import pathlib
@@ -8,7 +8,7 @@ import lance
 import pyarrow as pa
 import pytest
 
-from multimodal_toolkit.workflow.query import scalar_query, sql_query, vector_query
+from multimodal_toolkit.audio.workflow.query import scalar_query, sql_query, vector_query
 
 ROWS = {
     "doc_id": ["call_a", "call_b", "call_c", "call_d"],
@@ -119,6 +119,21 @@ def lance_uri_with_embedding() -> str:
     return uri
 
 
+@pytest.fixture()
+def lance_uri_with_null_embedding() -> str:
+    tmp = tempfile.mkdtemp()
+    uri = str(pathlib.Path(tmp) / "test_calls_null_emb.lance")
+    dim = 16
+    tbl = pa.table(
+        {
+            **ROWS,
+            "audio_embedding": pa.array([None, *([[0.0] * dim] * 3)], type=pa.list_(pa.float32(), dim)),
+        }
+    )
+    lance.write_dataset(tbl, uri)
+    return uri
+
+
 def test_vector_query_returns_top_k(lance_uri_with_embedding):
     rows = vector_query(lance_uri_with_embedding, "call_a", top_k=2)
     assert len(rows) == 2
@@ -127,6 +142,11 @@ def test_vector_query_returns_top_k(lance_uri_with_embedding):
 def test_vector_query_missing_doc_id(lance_uri_with_embedding):
     with pytest.raises(ValueError, match="not found"):
         vector_query(lance_uri_with_embedding, "nonexistent")
+
+
+def test_vector_query_null_embedding(lance_uri_with_null_embedding):
+    with pytest.raises(ValueError, match="not found"):
+        vector_query(lance_uri_with_null_embedding, "call_a")
 
 
 def test_vector_query_with_where(lance_uri_with_embedding):

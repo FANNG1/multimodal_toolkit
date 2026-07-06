@@ -132,7 +132,7 @@ def main() -> None:
         print(f"    --manifest s3://{args.bucket}/{args.manifest_key} \\")
         print(f"    --out s3://{args.bucket}/image_poc/analysis.jsonl")
     else:
-        print("  python -m multimodal_toolkit.workflow.analyze \\")
+        print("  python -m multimodal_toolkit.audio.workflow.analyze \\")
         print(f"    --manifest s3://{args.bucket}/{args.manifest_key} \\")
         print(f"    --out s3://{args.bucket}/audio_poc/analysis.jsonl")
 

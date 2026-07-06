@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from multimodal_toolkit import config
+from multimodal_toolkit.image import config
 
 
 def scrfd_model_dir() -> Path:

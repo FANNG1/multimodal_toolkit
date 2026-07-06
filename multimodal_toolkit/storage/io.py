@@ -37,6 +37,20 @@ def lance_storage_options(uri: str) -> dict:
     return opts
 
 
+def lance_write_mode(uri: str) -> str:
+    """Return append for existing Lance datasets, create for missing datasets."""
+    import lance
+
+    try:
+        lance.dataset(uri, storage_options=lance_storage_options(uri))
+    except ValueError as exc:
+        message = str(exc)
+        if "was not found" in message and "_versions" in message:
+            return "create"
+        raise
+    return "append"
+
+
 def configure_daft_runner() -> None:
     """Switch Daft to the Ray runner when USE_RAY=1, otherwise leave the default (native)."""
     from .. import config
