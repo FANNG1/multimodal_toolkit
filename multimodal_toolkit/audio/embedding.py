@@ -4,7 +4,7 @@ import io
 
 import numpy as np
 
-from .. import config
+from . import config
 
 
 class SignalEmbedder:

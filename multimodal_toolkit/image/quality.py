@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .. import config
+from . import config
 
 
 def decode_image(image_bytes: bytes | None):

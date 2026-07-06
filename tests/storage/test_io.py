@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import json
 
+import lance
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from multimodal_toolkit.storage.io import lance_storage_options, read_manifest
+from multimodal_toolkit.storage.io import lance_storage_options, lance_write_mode, read_manifest
 
 ROWS = {"doc_id": ["a.jpg", "b.jpg"], "s3_url": ["s3://bkt/a.jpg", "s3://bkt/b.jpg"]}
 
@@ -58,3 +59,24 @@ def test_lance_storage_options_s3():
     opts = lance_storage_options("s3://bucket/table.lance")
     assert opts["aws_endpoint"]
     assert opts["aws_virtual_hosted_style_access"] == "false"
+
+
+def test_lance_write_mode_create_for_missing_dataset(tmp_path):
+    assert lance_write_mode(str(tmp_path / "missing.lance")) == "create"
+
+
+def test_lance_write_mode_append_for_existing_dataset(tmp_path):
+    uri = str(tmp_path / "existing.lance")
+    lance.write_dataset(pa.table({"doc_id": ["a"]}), uri)
+    assert lance_write_mode(uri) == "append"
+
+
+def test_lance_write_mode_reraises_non_missing_value_error(monkeypatch):
+    import multimodal_toolkit.storage.io as storage_io
+
+    def _raise_value_error(*args, **kwargs):
+        raise ValueError("credential refresh failed")
+
+    monkeypatch.setattr(lance, "dataset", _raise_value_error)
+    with pytest.raises(ValueError, match="credential refresh failed"):
+        storage_io.lance_write_mode("s3://bucket/table.lance")

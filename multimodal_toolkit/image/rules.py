@@ -10,7 +10,7 @@
   is_face_blurry  —— 图里有脸，但人脸区域的清晰度低于 FACE_BLUR_THRESHOLD
                      （背景清晰但脸糊的图能通过 is_blurry，却会在这里被抓住）。
 
-输入必须带 status 列（见 workflow/analyze.py）：只有 status = "ok" 的行
+输入必须带 status 列（见 image/workflow/analyze.py）：只有 status = "ok" 的行
 才产生结论；下载/解码失败的行结论为 null——"不知道"必须和"判定为否"
 区分开，否则下游会把打不开的图当成合规的无人脸图。
 
@@ -24,7 +24,7 @@ import daft
 from daft import col
 from daft.functions import when
 
-from .. import config
+from . import config
 
 
 def add_rule_columns(df: daft.DataFrame) -> daft.DataFrame:

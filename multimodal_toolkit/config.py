@@ -9,7 +9,7 @@ except ImportError:  # Allows CLI --help before project dependencies are install
     load_dotenv = None
 
 
-def _load_env() -> None:
+def load_env() -> None:
     if load_dotenv is None:
         return
     for candidate in (Path.cwd() / ".env", Path(__file__).resolve().parent.parent / ".env"):
@@ -17,7 +17,7 @@ def _load_env() -> None:
             load_dotenv(candidate, override=False)
 
 
-_load_env()
+load_env()
 
 S3_ENDPOINT = os.getenv("MINIO_ENDPOINT", "http://127.0.0.1:9000")
 S3_KEY = os.getenv("MINIO_ROOT_USER", "minioadmin")
@@ -25,42 +25,5 @@ S3_SECRET = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
 S3_REGION = os.getenv("MINIO_REGION", "us-east-1")
 S3_USE_SSL = S3_ENDPOINT.startswith("https")
 
-ASR_MODEL = os.getenv("ASR_MODEL", "iic/SenseVoiceSmall")
-ASR_DEVICE = os.getenv("ASR_DEVICE", "cpu")
-
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-
-MIN_DURATION_S = float(os.getenv("MIN_DURATION_S", "0"))
-MAX_DURATION_S = float(os.getenv("MAX_DURATION_S", "1800"))
-
-EMBED_BACKEND = os.getenv("EMBED_BACKEND", "signal")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "facebook/wav2vec2-base")
-EMBED_DIM = int(os.getenv("EMBED_DIM", "128"))
-
-# Image scenario: face detection (InsightFace SCRFD) + clarity (Laplacian variance)
-INSIGHTFACE_MODEL = os.getenv("INSIGHTFACE_MODEL", "buffalo_l")
-INSIGHTFACE_ROOT = os.getenv("INSIGHTFACE_ROOT", "")  # "" = insightface default ~/.insightface
-FACE_DET_SIZE = int(os.getenv("FACE_DET_SIZE", "640"))
-FACE_DET_THRESH = float(os.getenv("FACE_DET_THRESH", "0.3"))
-IMAGE_LONG_EDGE = int(os.getenv("IMAGE_LONG_EDGE", "1024"))
-FACE_DET_SCORE_MIN = float(os.getenv("FACE_DET_SCORE_MIN", "0.5"))
-MIN_FACE_RATIO = float(os.getenv("MIN_FACE_RATIO", "0.01"))
-BLUR_THRESHOLD = float(os.getenv("BLUR_THRESHOLD", "100.0"))
-FACE_BLUR_THRESHOLD = float(os.getenv("FACE_BLUR_THRESHOLD", "80.0"))
-
 USE_RAY = os.getenv("USE_RAY", "0").lower() in ("1", "true", "yes")
 RAY_ADDRESS = os.getenv("RAY_ADDRESS") or None  # None = start/join local Ray
-
-PRIMARY_REASONS = [
-    "价格敏感",
-    "套餐不匹配",
-    "服务体验差",
-    "竞品影响",
-    "账户或设备变化",
-    "非本人办理",
-    "其他",
-]
-
-TEXT_EMOTIONS = ["平静", "不满", "焦急", "愤怒", "投诉倾向", "未知"]

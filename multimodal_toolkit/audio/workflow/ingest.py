@@ -13,8 +13,8 @@ import daft
 from daft import col, lit
 from daft.functions import download
 
-from ..storage.blob import validate_blob_v2
-from ..storage.io import configure_daft_runner, daft_io_config
+from ...storage.blob import validate_blob_v2
+from ...storage.io import configure_daft_runner, daft_io_config, lance_write_mode
 
 
 def _read_analysis(path: str, io_config) -> daft.DataFrame:
@@ -42,15 +42,7 @@ def run(analysis_path: str, lance_uri: str) -> None:
         lit(now).cast(daft.DataType.timestamp("us", "UTC")),
     )
 
-    # Use "create" for first write, "append" for subsequent batches
-    try:
-        import lance
-        from ..storage.io import lance_storage_options
-        lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
-        mode = "append"
-    except Exception:
-        mode = "create"
-
+    mode = lance_write_mode(lance_uri)
     df.write_lance(lance_uri, mode=mode, io_config=io_config, blob_columns=["audio_blob"])
     validate_blob_v2(lance_uri, "audio_blob")
 

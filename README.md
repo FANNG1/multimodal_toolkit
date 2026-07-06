@@ -6,8 +6,15 @@ Also includes an image analysis workflow (face presence + clarity detection), fu
 
 ## Architecture overview
 
-The toolkit uses the `workflow/` pipeline: analysis runs first, then audio blobs
-and analysis metadata are co-ingested into the Lance asset table.
+Media-specific analysis lives under each media package (`audio/workflow/` and
+`image/workflow/`). Top-level `workflow/` owns media-agnostic Lance table
+operations such as index creation and retention management. Shared S3 / Ray
+configuration stays in `multimodal_toolkit/config.py`; media-specific settings
+and schemas live in `audio/config.py`, `image/config.py`, `audio/schema.py`,
+and `image/schema.py`.
+
+The audio pipeline runs analysis first, then audio blobs and analysis metadata
+are co-ingested into the Lance asset table.
 
 ## Workflow data flow
 
@@ -15,7 +22,7 @@ and analysis metadata are co-ingested into the Lance asset table.
 Manifest (parquet / jsonl / csv)
   doc_id, s3_url
        │
-       ▼  Stage 1 — workflow/analyze.py
+       ▼  Stage 1 — audio/workflow/analyze.py
        │  Daft: read manifest → download audio bytes → duration filter
        │        → SenseVoice ASR (transcript + acoustic_emotion)
        │        → PII redaction (ID card, phone numbers)
@@ -25,7 +32,7 @@ Manifest (parquet / jsonl / csv)
        ├── (no --embed)  →  JSONL on S3
        └── (--embed)     →  Lance staging table on S3
                 │
-                ▼  Stage 2 — workflow/ingest.py
+                ▼  Stage 2 — audio/workflow/ingest.py
                 │  Daft: read JSONL or Lance staging table
                 │        → download audio blobs from s3_url
                 │        → stamp ingest_time
@@ -44,7 +51,7 @@ Manifest (parquet / jsonl / csv)
                 │  lance_ray  : IVF_PQ index on audio_embedding
                 │  pylance    : ZONEMAP index on ingest_time
                 │
-                ├──▶  Stage 4 — workflow/query.py
+                ├──▶  Stage 4 — audio/workflow/query.py
                 │     Daft SQL (daft.sql())   : --sql    (scalar / aggregation)
                 │     Daft scanner pushdown   : --where  (scalar filter)
                 │     Daft scanner nearest    : --vector-from  (ANN, IVF index)
@@ -98,7 +105,7 @@ USE_RAY=0               # set to 1 to use Ray for Daft-backed steps
 RAY_ADDRESS=            # leave empty to start/join local Ray
 ```
 
-## Usage — workflow pipeline
+## Usage — audio workflow pipeline
 
 The manifest must be parquet, jsonl, or csv with at minimum `doc_id` and `s3_url` columns.  
 `--lance-uri` accepts both local paths and `s3://` URIs.
@@ -109,12 +116,12 @@ Downloads audio from S3, runs ASR and LLM analysis, writes output to S3.
 
 ```sh
 # Output: JSONL (no embeddings)
-python -m multimodal_toolkit.workflow.analyze \
+python -m multimodal_toolkit.audio.workflow.analyze \
   --manifest s3://bucket/audio/manifest.parquet \
   --out      s3://bucket/audio/analysis.jsonl
 
 # Output: Lance staging table (includes audio_embedding; required for ANN search later)
-python -m multimodal_toolkit.workflow.analyze \
+python -m multimodal_toolkit.audio.workflow.analyze \
   --manifest s3://bucket/audio/manifest.parquet \
   --out      s3://bucket/audio/staging.lance \
   --embed
@@ -125,7 +132,7 @@ python -m multimodal_toolkit.workflow.analyze \
 Reads Stage 1 output, downloads audio blobs, and appends them together with the analysis metadata into the Lance asset table.
 
 ```sh
-python -m multimodal_toolkit.workflow.ingest \
+python -m multimodal_toolkit.audio.workflow.ingest \
   --analysis  s3://bucket/audio/analysis.jsonl \
   --lance-uri s3://bucket/audio/calls.lance
 ```
@@ -156,30 +163,30 @@ python -m multimodal_toolkit.workflow.index \
 
 ```sh
 # Scalar filter (Daft pushdown via read_lance default_scan_options)
-python -m multimodal_toolkit.workflow.query \
+python -m multimodal_toolkit.audio.workflow.query \
   --lance-uri s3://bucket/audio/calls.lance \
   --where "bad_tone = true OR downgrade_related = true" \
   --top-k 20
 
 # Full Daft SQL SELECT (table name in scope: calls)
-python -m multimodal_toolkit.workflow.query \
+python -m multimodal_toolkit.audio.workflow.query \
   --lance-uri s3://bucket/audio/calls.lance \
   --sql "SELECT primary_reason, COUNT(*) AS cnt FROM calls GROUP BY primary_reason ORDER BY cnt DESC"
 
 # Scalar filter with projection via Daft SQL
-python -m multimodal_toolkit.workflow.query \
+python -m multimodal_toolkit.audio.workflow.query \
   --lance-uri s3://bucket/audio/calls.lance \
   --sql "SELECT doc_id, emotion_score, primary_reason FROM calls WHERE bad_tone = true AND emotion_score > 0.5 ORDER BY emotion_score DESC" \
   --top-k 20
 
 # ANN vector search via Daft Lance scanner (uses IVF index)
-python -m multimodal_toolkit.workflow.query \
+python -m multimodal_toolkit.audio.workflow.query \
   --lance-uri s3://bucket/audio/calls.lance \
   --vector-from call_001.mp3 \
   --top-k 10
 
 # Combined: ANN with scalar pre-filter
-python -m multimodal_toolkit.workflow.query \
+python -m multimodal_toolkit.audio.workflow.query \
   --lance-uri s3://bucket/audio/calls.lance \
   --vector-from call_001.mp3 \
   --where "downgrade_related = true" \

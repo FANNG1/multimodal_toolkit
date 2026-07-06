@@ -4,8 +4,8 @@ from __future__ import annotations
 import daft
 import pytest
 
-from multimodal_toolkit import config
 from multimodal_toolkit.image.rules import add_rule_columns
+from multimodal_toolkit.image import config
 
 
 @pytest.fixture(autouse=True)
