@@ -21,6 +21,12 @@ jobs:
         run: uv sync --locked
 
       # SCRFD-dependent tests skip themselves when the model pack is absent,
-      # so no model download is needed in CI.
+      # so no model download is needed in CI. Ray-dependent tests are
+      # excluded by default (pyproject addopts) and run in the non-blocking
+      # step below.
       - name: Run tests
         run: uv run pytest tests/ -q
+
+      - name: Run Ray integration tests (non-blocking)
+        run: uv run pytest tests/ -q -m ray
+        continue-on-error: true

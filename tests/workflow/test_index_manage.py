@@ -1,7 +1,11 @@
 """Tests for workflow/index.py and workflow/manage.py — local lance tables.
 
-lance_ray starts a local Ray instance for index creation and compaction,
-so this module is slower than the rest of the suite (tens of seconds).
+Ray involvement differs per test:
+- build_embedding_index hard-depends on Ray (lance_ray.create_index); that
+  test is marked `ray` and excluded from the default run (see pyproject) —
+  run it explicitly with `pytest -m ray`.
+- delete_by_date also touches Ray via compact_files, but manage.py treats
+  compaction as best-effort, so those tests pass even where Ray is unusable.
 """
 from __future__ import annotations
 
@@ -49,6 +53,27 @@ def lance_uri() -> str:
 
 
 @pytest.fixture()
+def local_ray():
+    """Guarantee a hermetic local Ray cluster started from this venv.
+
+    Ray's default init prefers joining an existing cluster (RAY_ADDRESS env
+    or a stray `ray start` on the machine). A foreign cluster's workers run
+    a different Python env and cannot deserialize this venv's lance_ray
+    functions — the test would then fail for environment reasons, not code.
+    """
+    import os
+
+    import ray
+
+    os.environ.pop("RAY_ADDRESS", None)
+    if ray.is_initialized():
+        ray.shutdown()
+    ray.init(address="local", include_dashboard=False, log_to_driver=False)
+    yield
+    ray.shutdown()
+
+
+@pytest.fixture()
 def lance_uri_no_embedding() -> str:
     tmp = tempfile.mkdtemp()
     uri = str(pathlib.Path(tmp) / "table_noemb.lance")
@@ -66,7 +91,8 @@ def test_build_time_index(lance_uri):
     assert any(idx["fields"] == ["ingest_time"] for idx in indices)
 
 
-def test_build_embedding_index_small_table(lance_uri):
+@pytest.mark.ray
+def test_build_embedding_index_small_table(lance_uri, local_ray):
     # Small-table parameters recommended by index.py's own docstring.
     build_embedding_index(lance_uri, num_partitions=1, sample_rate=2, index_type="IVF_FLAT")
     indices = lance.dataset(lance_uri).list_indices()
