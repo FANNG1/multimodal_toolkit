@@ -281,10 +281,10 @@ python -m multimodal_toolkit.image.workflow.analyze \
 
 # Stage 2 — ingest (image blobs + analysis metadata → Lance image asset table)
 python -m multimodal_toolkit.image.workflow.ingest \
-  --analysis  s3://contacts/image_poc/analysis.jsonl \
+  --analysis  s3://contacts/image_poc/staging.lance \
   --lance-uri s3://contacts/image_poc/assets.lance
 
-# Pass the .lance staging URI if Stage 1 was run with --embed.
+# If Stage 1 was run without --embed, pass analysis.jsonl instead.
 
 # Stage 3 — index for text/image similarity search
 python -m multimodal_toolkit.workflow.index \
