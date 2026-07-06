@@ -290,7 +290,7 @@ python -m multimodal_toolkit.workflow.manage \
 |-----------|---------|-------|
 | Daft | 0.7.15 | Main execution engine |
 | daft-lance | 0.4.0 | `read_lance`, `write_lance`, `take_blobs`, `create_scalar_index`, `compact_files` |
-| pylance | 7.0.0 | Lance dataset, blob v2, ANN scanner, delete, cleanup |
+| pylance | 8.0.0 | Lance dataset, blob v2, ANN scanner, delete, cleanup, blob-table compaction |
 | lance-ray | 0.4.2 | Vector index creation; write-back path deferred |
 | Ray | 2.55.1 | Pulled in by lance-ray; Daft uses native runner unless `USE_RAY=1` |
 
@@ -316,8 +316,9 @@ If `DEEPSEEK_API_KEY` is not set, `downgrade_related`, `bad_tone`, `primary_reas
 **Local Lance URIs are verified end-to-end.**  
 S3 Lance table write/read is exercised by the underlying libraries but should be treated as a separate validation item for this POC.
 
-**Blob v2 asset tables cannot be compacted.**  
-Compaction of tables containing blob v2 columns fails inside lance's decoder with
-current versions (pylance 7.x / lance-ray 0.4.x), regardless of engine. Stage 5
-deletes rows and cleans up old versions normally, but logs a `[warn]` and skips
-compaction on such tables. Plain tables (no blob columns) compact fine.
+**Blob v2 compaction requires pylance ≥ 8.0.0.**  
+Older pylance (≤ 7.x) fails inside the decoder when compacting tables with blob v2
+columns (lance-format/lance#7071, fixed by #7017 and released in 8.0.0). The project
+pins `pylance>=8.0.0`; Stage 5 compaction now hard-fails on error instead of being
+skipped. The explicit `compaction_options={}` remains as a workaround for a separate
+lance-ray 0.4.x defect (lance-format/lance-ray#5224).

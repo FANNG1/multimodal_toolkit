@@ -16,7 +16,7 @@ dependencies = [
   "opencv-python-headless",
   "openai",
   "pyarrow",
-  "pylance",
+  "pylance>=8.0.0",
   "python-dotenv",
   "ray",
   "soundfile",

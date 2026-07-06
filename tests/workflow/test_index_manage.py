@@ -1,11 +1,12 @@
 """Tests for workflow/index.py and workflow/manage.py — local lance tables.
 
-Ray involvement differs per test:
-- build_embedding_index hard-depends on Ray (lance_ray.create_index); that
-  test is marked `ray` and excluded from the default run (see pyproject) —
-  run it explicitly with `pytest -m ray`.
-- delete_by_date also touches Ray via compact_files, but manage.py treats
-  compaction as best-effort, so those tests pass even where Ray is unusable.
+Ray-touching tests use the shared `local_ray` fixture (tests/conftest.py) so
+they always run against a hermetic local cluster from this venv.
+build_embedding_index is additionally marked `ray` and excluded from the
+default run (see pyproject) — run it explicitly with `pytest -m ray`.
+delete_by_date tests stay in the default suite: since pylance 8 removed the
+blob compaction limitation, they verify the full delete + compact + cleanup
+path, including on a blob v2 table.
 """
 from __future__ import annotations
 
@@ -53,24 +54,31 @@ def lance_uri() -> str:
 
 
 @pytest.fixture()
-def local_ray():
-    """Guarantee a hermetic local Ray cluster started from this venv.
+def lance_uri_blob() -> str:
+    """A blob v2 table written the way the asset tables are (daft-lance).
 
-    Ray's default init prefers joining an existing cluster (RAY_ADDRESS env
-    or a stray `ray start` on the machine). A foreign cluster's workers run
-    a different Python env and cannot deserialize this venv's lance_ray
-    functions — the test would then fail for environment reasons, not code.
+    This layout (extension type lance.blob.v2, storage 2.2) could not be
+    compacted before pylance 8.0.0 (lance-format/lance#7071).
     """
-    import os
+    import daft
+    from daft import col
 
-    import ray
-
-    os.environ.pop("RAY_ADDRESS", None)
-    if ray.is_initialized():
-        ray.shutdown()
-    ray.init(address="local", include_dashboard=False, log_to_driver=False)
-    yield
-    ray.shutdown()
+    tmp = tempfile.mkdtemp()
+    uri = str(pathlib.Path(tmp) / "table_blob.lance")
+    times = [
+        datetime.fromisoformat(DAYS[i % len(DAYS)]).replace(tzinfo=timezone.utc)
+        for i in range(N_ROWS)
+    ]
+    df = daft.from_pydict(
+        {
+            "doc_id": [f"doc_{i:04d}" for i in range(N_ROWS)],
+            "ingest_time": times,
+            "blob": [b"x" * 100] * N_ROWS,
+        }
+    )
+    df = df.with_column("ingest_time", col("ingest_time").cast(daft.DataType.timestamp("us", "UTC")))
+    df.write_lance(uri, mode="create", blob_columns=["blob"])
+    return uri
 
 
 @pytest.fixture()
@@ -113,18 +121,31 @@ def test_delete_requires_a_bound(lance_uri):
         delete_by_date(lance_uri)
 
 
-def test_delete_before(lance_uri):
+def test_delete_before(lance_uri, local_ray):
     delete_by_date(lance_uri, before="2024-03-01")
     assert lance.dataset(lance_uri).count_rows() == 200  # 2024-01-01 rows gone
 
 
-def test_delete_after(lance_uri):
+def test_delete_after(lance_uri, local_ray):
     delete_by_date(lance_uri, after="2024-09-01")
     assert lance.dataset(lance_uri).count_rows() == 200  # 2024-12-01 rows gone
 
 
-def test_delete_window(lance_uri):
+def test_delete_window(lance_uri, local_ray):
     # Outside 2024-03-01 .. 2024-09-01 survives: keeps Jan and Dec rows.
     delete_by_date(lance_uri, before="2024-09-01", after="2024-03-01")
     remaining = lance.dataset(lance_uri).count_rows()
     assert remaining == 200
+
+
+def test_delete_and_compact_blob_table(lance_uri_blob, local_ray):
+    """Regression for lance-format/lance#7071: blob v2 tables can be
+    compacted since pylance 8.0.0. On 7.x this raised inside lance's decoder
+    and manage.py had to treat compaction as best-effort."""
+    delete_by_date(lance_uri_blob, before="2024-03-01")
+    ds = lance.dataset(lance_uri_blob)
+    assert ds.count_rows() == 200
+    # Reaching here means compact_files succeeded (manage.py no longer
+    # swallows compaction errors); verify blobs still readable afterwards.
+    blob = ds.take_blobs("blob", indices=[0])[0]
+    assert len(blob.read()) == 100
