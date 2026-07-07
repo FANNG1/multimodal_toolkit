@@ -339,6 +339,7 @@ Stage 1 downloads audio bytes for ASR and embedding; Stage 2 downloads the same 
 
 **`--embed` in Stage 1 is required for ANN search.**  
 If Stage 1 was run without `--embed`, the Lance asset table has no `audio_embedding` column. Stage 3 will error and Stage 4 `--vector-from` will have nothing to search. Re-run Stage 1 with `--embed` and re-ingest to add embeddings.
+For image tables, keep all batches for the same Lance table consistent: either all Stage 1 runs use `--embed`, or none do. The image ingest step rejects appending `image_embedding` batches to a table created without that column, and vice versa.
 
 **IVF_PQ minimum row count.**  
 The default `--num-partitions 16` requires at least 4096 rows. For tables with fewer rows, pass `--num-partitions 1` (or skip `--embedding` and rely on scalar queries only).

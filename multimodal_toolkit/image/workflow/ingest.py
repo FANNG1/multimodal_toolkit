@@ -13,19 +13,33 @@ from daft import col, lit
 from daft.functions import download
 
 from ...storage.blob import validate_blob_v2
-from ...storage.io import configure_daft_runner, daft_io_config, lance_write_mode
+from ...storage.io import (
+    configure_daft_runner,
+    daft_io_config,
+    lance_storage_options,
+    lance_write_mode,
+    read_analysis_output,
+)
 
 
-def _read_analysis(path: str, io_config) -> daft.DataFrame:
-    """Detect JSON vs Lance staging output."""
-    from pathlib import Path
+def _validate_embedding_schema(lance_uri: str, mode: str, analysis_has_embedding: bool) -> None:
+    if mode != "append":
+        return
 
-    low = path.rstrip("/").lower()
-    if low.endswith(".jsonl") or low.endswith(".ndjson") or low.endswith(".json"):
-        return daft.read_json(path, io_config=io_config)
-    if low.endswith(".lance") or (not low.startswith("s3://") and Path(path, "_versions").exists()):
-        return daft.read_lance(path, io_config=io_config)
-    return daft.read_json(path, io_config=io_config)
+    import lance
+
+    ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
+    table_has_embedding = "image_embedding" in ds.schema.names
+    if table_has_embedding == analysis_has_embedding:
+        return
+
+    existing = "with" if table_has_embedding else "without"
+    incoming = "with" if analysis_has_embedding else "without"
+    raise ValueError(
+        "Cannot append image analysis "
+        f"{incoming} image_embedding to an existing table {existing} image_embedding. "
+        "Use a separate Lance table, or keep all batches consistent about Stage 1 --embed."
+    )
 
 
 def run(analysis_path: str, lance_uri: str) -> None:
@@ -34,7 +48,10 @@ def run(analysis_path: str, lance_uri: str) -> None:
 
     now = datetime.now(timezone.utc)
 
-    df = _read_analysis(analysis_path, io_config)
+    df = read_analysis_output(analysis_path, io_config)
+    analysis_has_embedding = "image_embedding" in df.schema().column_names()
+    mode = lance_write_mode(lance_uri)
+    _validate_embedding_schema(lance_uri, mode, analysis_has_embedding)
 
     # 重新按 s3_url 下载图片字节作为 blob 列。Stage 1 的 JSONL 里不带
     # 原始字节（JSON 存不了大二进制），所以这里是第二次下载。
@@ -49,7 +66,6 @@ def run(analysis_path: str, lance_uri: str) -> None:
         lit(now).cast(daft.DataType.timestamp("us", "UTC")),
     )
 
-    mode = lance_write_mode(lance_uri)
     df.write_lance(lance_uri, mode=mode, io_config=io_config, blob_columns=["image_blob"])
     # 校验 image_blob 确实以 lance blob v2 编码落盘（而不是被静默降级成
     # 普通 large_binary），库版本升级时这是最容易出问题的地方。

@@ -32,6 +32,12 @@ class ChineseClipEmbedder:
         self._device = config.IMAGE_EMBED_DEVICE
         self._processor = ChineseCLIPProcessor.from_pretrained(config.IMAGE_EMBED_MODEL)
         self._model = ChineseCLIPModel.from_pretrained(config.IMAGE_EMBED_MODEL)
+        model_dim = getattr(self._model.config, "projection_dim", None)
+        if model_dim is not None and model_dim != config.IMAGE_EMBED_DIM:
+            raise ValueError(
+                f"IMAGE_EMBED_DIM={config.IMAGE_EMBED_DIM} does not match "
+                f"{config.IMAGE_EMBED_MODEL} projection_dim={model_dim}"
+            )
         self._model.to(self._device)
         self._model.eval()
 

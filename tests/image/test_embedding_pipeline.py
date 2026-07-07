@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 
 class _FakeDetector:
@@ -28,8 +29,6 @@ class _FakeEmbedder:
 
 
 def test_embedding_pipeline_from_analyze_to_similarity_query(monkeypatch, tmp_path):
-    import lance
-
     import multimodal_toolkit.image.detector as detector
     import multimodal_toolkit.image.embedding as embedding
     from multimodal_toolkit.image.workflow.analyze import run as analyze_run
@@ -47,8 +46,14 @@ def test_embedding_pipeline_from_analyze_to_similarity_query(monkeypatch, tmp_pa
         img_b.read_bytes(): [0.0, 1.0] + [0.0] * 510,
     }
     fake_embedder = _FakeEmbedder(vectors_by_bytes)
+    create_index_calls = []
+
+    def fake_create_index(uri, **kwargs):
+        create_index_calls.append((uri, kwargs))
+
     monkeypatch.setattr(detector, "get_detector", lambda: _FakeDetector())
     monkeypatch.setattr(embedding, "get_embedder", lambda: fake_embedder)
+    monkeypatch.setattr("multimodal_toolkit.workflow.index.lance_ray.create_index", fake_create_index)
 
     manifest = tmp_path / "manifest.parquet"
     pq.write_table(
@@ -61,7 +66,7 @@ def test_embedding_pipeline_from_analyze_to_similarity_query(monkeypatch, tmp_pa
         manifest,
     )
 
-    staging_uri = str(tmp_path / "staging.lance")
+    staging_uri = str(tmp_path / "staging")
     assets_uri = str(tmp_path / "assets.lance")
     analyze_run(str(manifest), staging_uri, embed=True)
     ingest_run(staging_uri, assets_uri)
@@ -73,11 +78,55 @@ def test_embedding_pipeline_from_analyze_to_similarity_query(monkeypatch, tmp_pa
         index_type="IVF_FLAT",
     )
 
-    ds = lance.dataset(assets_uri)
-    assert "image_embedding" in ds.schema.names
-    assert any(idx["fields"] == ["image_embedding"] for idx in ds.list_indices())
+    assert create_index_calls == [
+        (
+            assets_uri,
+            {
+                "column": "image_embedding",
+                "index_type": "IVF_FLAT",
+                "num_partitions": 1,
+                "sample_rate": 2,
+                "replace": True,
+                "storage_options": None,
+            },
+        )
+    ]
 
     assert [r["doc_id"] for r in text_query(assets_uri, "头像", top_k=1)] == ["avatar.jpg"]
     assert [r["doc_id"] for r in image_path_query(assets_uri, str(img_a), top_k=1)] == [
         "avatar.jpg"
     ]
+
+
+def test_analyze_without_embed_rejects_lance_output(tmp_path):
+    from multimodal_toolkit.image.workflow.analyze import run as analyze_run
+
+    with pytest.raises(ValueError, match="requires --embed"):
+        analyze_run(str(tmp_path / "manifest.parquet"), str(tmp_path / "analysis.lance"), embed=False)
+
+
+def test_ingest_rejects_mixed_embedding_schema(tmp_path):
+    import lance
+
+    from multimodal_toolkit.image.workflow.ingest import run as ingest_run
+
+    assets_uri = str(tmp_path / "assets.lance")
+    lance.write_dataset(pa.table({"doc_id": ["old"], "s3_url": ["old.jpg"]}), assets_uri)
+
+    staging_uri = str(tmp_path / "staging")
+    lance.write_dataset(
+        pa.table(
+            {
+                "doc_id": ["new"],
+                "s3_url": ["new.jpg"],
+                "image_embedding": pa.array(
+                    [[1.0] + [0.0] * 511],
+                    type=pa.list_(pa.float32(), 512),
+                ),
+            }
+        ),
+        staging_uri,
+    )
+
+    with pytest.raises(ValueError, match="consistent about Stage 1 --embed"):
+        ingest_run(staging_uri, assets_uri)

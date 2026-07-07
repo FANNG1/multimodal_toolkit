@@ -201,10 +201,14 @@ def main() -> None:
     vector_modes = [bool(args.text), bool(args.image_path), bool(args.image_from)]
     if sum(vector_modes) > 1:
         parser.error("provide only one of --text, --image-path, or --image-from")
+    if args.sql and (args.where or any(vector_modes)):
+        parser.error("--sql cannot be combined with --where, --text, --image-path, or --image-from")
     distance_range = None
     if args.distance_min is not None or args.distance_max is not None:
         if args.distance_min is None or args.distance_max is None:
             parser.error("--distance-min and --distance-max must be provided together")
+        if not any(vector_modes):
+            parser.error("--distance-min/--distance-max can only be used with vector search")
         distance_range = (args.distance_min, args.distance_max)
     run(
         args.lance_uri,

@@ -2,7 +2,7 @@
 
 API selection:
   Scalar index (ZONEMAP) → pylance ds.create_scalar_index()
-  Vector index (IVF_PQ)  → pylance ds.create_index()
+  Vector index (IVF_PQ)  → lance_ray.create_index()
 
   --embedding   IVF index on an embedding column (default: audio_embedding)
   --time        ZONEMAP index on ingest_time (for fast time range queries)
@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 
 import lance
+import lance_ray
 
 from ..storage.io import lance_storage_options
 
@@ -35,13 +36,13 @@ def build_embedding_index(
         column=column,
         index_type=index_type,
         num_partitions=num_partitions,
-        streaming_sample_rate=sample_rate,
+        sample_rate=sample_rate,
         replace=True,
         storage_options=storage_options,
     )
     if index_type in ("IVF_PQ", "IVF_HNSW_PQ"):
         kwargs["num_sub_vectors"] = num_sub_vectors
-    ds.create_index(**kwargs)
+    lance_ray.create_index(lance_uri, **kwargs)
     print(f"[ok] built {index_type} index on {column} ({num_partitions} partitions): {lance_uri}")
 
 

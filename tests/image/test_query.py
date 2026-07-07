@@ -11,6 +11,7 @@ import pytest
 from multimodal_toolkit.image.workflow.query import (
     image_doc_query,
     image_path_query,
+    main,
     scalar_query,
     sql_query,
     text_query,
@@ -140,3 +141,21 @@ def test_image_doc_query(lance_uri_with_embedding):
 def test_image_doc_query_null_embedding(lance_uri_with_embedding):
     with pytest.raises(ValueError, match="null image_embedding"):
         image_doc_query(lance_uri_with_embedding, "img_bad")
+
+
+def test_cli_rejects_sql_with_vector_mode(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["query", "--lance-uri", "images.lance", "--sql", "SELECT 1", "--text", "头像"],
+    )
+    with pytest.raises(SystemExit):
+        main()
+
+
+def test_cli_rejects_distance_without_vector_mode(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["query", "--lance-uri", "images.lance", "--where", "status = 'ok'", "--distance-min", "0", "--distance-max", "1"],
+    )
+    with pytest.raises(SystemExit):
+        main()

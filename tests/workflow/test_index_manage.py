@@ -99,11 +99,28 @@ def test_build_time_index(lance_uri):
     assert any(idx["fields"] == ["ingest_time"] for idx in indices)
 
 
-def test_build_embedding_index_small_table(lance_uri):
-    # Small-table parameters recommended by index.py's own docstring.
+def test_build_embedding_index_uses_lance_ray(monkeypatch, lance_uri):
+    calls = []
+
+    def fake_create_index(uri, **kwargs):
+        calls.append((uri, kwargs))
+
+    monkeypatch.setattr("multimodal_toolkit.workflow.index.lance_ray.create_index", fake_create_index)
     build_embedding_index(lance_uri, num_partitions=1, sample_rate=2, index_type="IVF_FLAT")
-    indices = lance.dataset(lance_uri).list_indices()
-    assert any(idx["fields"] == ["audio_embedding"] for idx in indices)
+
+    assert calls == [
+        (
+            lance_uri,
+            {
+                "column": "audio_embedding",
+                "index_type": "IVF_FLAT",
+                "num_partitions": 1,
+                "sample_rate": 2,
+                "replace": True,
+                "storage_options": None,
+            },
+        )
+    ]
 
 
 def test_build_embedding_index_missing_column(lance_uri_no_embedding):
