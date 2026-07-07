@@ -348,7 +348,7 @@ python -m multimodal_toolkit.workflow.manage \
 |-----------|---------|-------|
 | Daft | 0.7.15 | Main execution engine |
 | daft-lance | 0.4.0 | `read_lance`, `write_lance`, `take_blobs`, `create_scalar_index`, `compact_files` |
-| pylance | 8.0.0 | Lance dataset, blob v2, ANN scanner, delete, cleanup, blob-table compaction |
+| pylance | 7.0.0 | Lance dataset, blob v2, ANN scanner, delete, cleanup |
 | lance-ray | 0.4.2 | Vector index creation; write-back path deferred |
 | Ray | 2.55.1 | Pulled in by lance-ray; Daft uses native runner unless `USE_RAY=1` |
 
@@ -375,9 +375,9 @@ If `DEEPSEEK_API_KEY` is not set, `downgrade_related`, `bad_tone`, `primary_reas
 **Local Lance URIs are verified end-to-end.**  
 S3 Lance table write/read is exercised by the underlying libraries but should be treated as a separate validation item for this POC.
 
-**Blob v2 compaction requires pylance ≥ 8.0.0.**  
-Older pylance (≤ 7.x) fails inside the decoder when compacting tables with blob v2
-columns (lance-format/lance#7071, fixed by #7017 and released in 8.0.0). The project
-pins `pylance>=8.0.0`; Stage 5 compaction now hard-fails on error instead of being
-skipped. The explicit `compaction_options={}` remains as a workaround for a separate
-lance-ray 0.4.x defect (lance-format/lance-ray#5224).
+**Blob v2 asset table compaction is disabled for now.**
+Current `lance-ray 0.4.2` vector index creation works with pylance 7.x, while pylance
+8.0.0 fixes blob v2 compaction but changes distributed index commit APIs that
+`lance-ray 0.4.2` still calls. The project pins `pylance<8.0.0` for now and Stage 5
+skips compaction after deleting rows. Re-enable blob v2 compaction after upgrading
+to pylance 8.x together with a compatible lance-ray release.
