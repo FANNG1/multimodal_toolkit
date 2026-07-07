@@ -17,7 +17,7 @@ dependencies = [
   "openai",
   "pillow",
   "pyarrow",
-  "pylance>=8.0.0",
+  "pylance<8.0.0",
   "python-dotenv",
   "ray",
   "soundfile",

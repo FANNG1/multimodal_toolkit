@@ -2,7 +2,7 @@
 
 API priority (lance_ray preferred for table management):
   delete        → pylance ds.delete()              (no Daft/lance-ray equivalent)
-  compact       → lance_ray.compact_files()        (preferred for table management)
+  compact       → disabled for blob v2 tables until pylance 8 is supported
   cleanup       → pylance ds.cleanup_old_versions() (no alternative)
 
   --before DATE   delete rows where ingest_time < DATE
@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 
 import lance
-import lance_ray
 
 from ..storage.io import lance_storage_options
 
@@ -42,16 +41,10 @@ def delete_by_date(
 
     print(f"[ok] deleted rows where: {filter_str}")
 
-    # compact: lance_ray (preferred for table management).
-    # compaction_options must be an explicit dict: lance_ray 0.4.x passes the
-    # default None straight into Compaction.plan(), which rejects it
-    # (lance-format/lance-ray#5224; drop once the fix ships).
-    lance_ray.compact_files(
-        lance_uri,
-        compaction_options={},
-        storage_options=lance_storage_options(lance_uri),
-    )
-    print(f"[ok] compacted: {lance_uri}")
+    # Blob v2 tables cannot be compacted safely on pylance 7.x
+    # (lance-format/lance#7071). Keep compaction disabled until the project
+    # can move to pylance 8.x together with a compatible lance-ray release.
+    print("[warn] compaction skipped; enable after upgrading to pylance 8.x")
     ds.cleanup_old_versions()
 
 
