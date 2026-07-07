@@ -98,6 +98,15 @@ def test_embedding_pipeline_from_analyze_to_similarity_query(monkeypatch, tmp_pa
     ]
 
 
+def test_embed_image_bytes_tolerates_undecodable_bytes():
+    """cv2 能解、PIL 解不开的字节不能打挂批次：返回 None 而不是抛异常。"""
+    from multimodal_toolkit.image.embedding import ChineseClipEmbedder
+
+    # 跳过 __init__（不加载模型）：解码失败发生在触碰任何模型属性之前
+    embedder = object.__new__(ChineseClipEmbedder)
+    assert embedder.embed_image_bytes(b"not an image") is None
+
+
 def test_analyze_without_embed_rejects_lance_output(tmp_path):
     from multimodal_toolkit.image.workflow.analyze import run as analyze_run
 
