@@ -66,6 +66,8 @@ def read_analysis_output(path: str, io_config):
     low = path.rstrip("/").lower()
     if low.endswith(".jsonl") or low.endswith(".ndjson") or low.endswith(".json"):
         return daft.read_json(path, io_config=io_config)
+    if low.endswith(".lance"):
+        return daft.read_lance(path, io_config=io_config)
     if not low.startswith("s3://") and not Path(path, "_versions").exists():
         return daft.read_json(path, io_config=io_config)
     return daft.read_lance(path, io_config=io_config)
