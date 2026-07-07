@@ -315,6 +315,28 @@ python -m multimodal_toolkit.image.workflow.query \
   --lance-uri s3://contacts/image_poc/assets.lance \
   --image-from face_001.jpg
 
+# Join a description table (doc_id → description) into similarity results.
+# The table can be a plain parquet/jsonl/csv file — no ingestion needed:
+#
+#   import pyarrow as pa, pyarrow.parquet as pq
+#   pq.write_table(pa.table({
+#       "doc_id": ["face_001.jpg", "group_photo.jpg"],
+#       "description": ["清晰正面人像", "两人合影"],
+#   }), "descriptions.parquet")
+#
+# Results gain a `description` column (left join: images without a
+# description stay in the results with description = null).
+python -m multimodal_toolkit.image.workflow.query \
+  --lance-uri s3://contacts/image_poc/assets.lance \
+  --text "合影" \
+  --desc-table descriptions.parquet
+
+# With --sql the description table is registered as `descriptions`:
+python -m multimodal_toolkit.image.workflow.query \
+  --lance-uri s3://contacts/image_poc/assets.lance \
+  --sql "SELECT i.doc_id, d.description FROM images i LEFT JOIN descriptions d ON i.doc_id = d.doc_id WHERE i.has_face = true" \
+  --desc-table descriptions.parquet
+
 # Stage 5 — manage (shared entry point)
 python -m multimodal_toolkit.workflow.manage \
   --lance-uri s3://contacts/image_poc/assets.lance --before 2025-01-01
