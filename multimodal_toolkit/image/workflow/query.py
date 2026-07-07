@@ -5,6 +5,9 @@
   --text       文本搜图（ChineseCLIP 文本向量 → image_embedding ANN）
   --image-path 本地图片搜相似图
   --image-from 表内 doc_id 搜相似图
+  --desc-table 描述表（doc_id → description，parquet/jsonl/csv/lance 均可）：
+               查询结果按 doc_id left join 出 description 列；--sql 模式下
+               该表以 ``descriptions`` 为名注册进 SQL 作用域，可手写 JOIN
 """
 from __future__ import annotations
 
@@ -41,7 +44,44 @@ def _doc_id_filter(doc_id: str) -> str:
     return f"doc_id = '{escaped}'"
 
 
-def scalar_query(lance_uri: str, where: str | None = None, top_k: int = 100) -> list[dict]:
+def _read_desc_table(uri: str):
+    """读取描述表（doc_id → description），按后缀选 reader。
+
+    描述表可以是任意 Daft 能读的表：parquet/jsonl/csv 文件即可当表用，
+    不必先落成 Lance；无后缀匹配时按 Lance 表读。
+    """
+    import daft
+
+    io_config = daft_io_config()
+    low = uri.rstrip("/").lower()
+    if low.endswith(".parquet"):
+        df = daft.read_parquet(uri, io_config=io_config)
+    elif low.endswith(".jsonl") or low.endswith(".ndjson") or low.endswith(".json"):
+        df = daft.read_json(uri, io_config=io_config)
+    elif low.endswith(".csv"):
+        df = daft.read_csv(uri, io_config=io_config)
+    else:
+        df = daft.read_lance(uri, io_config=io_config)
+    return df.select("doc_id", "description")
+
+
+def _maybe_join_description(df, cols: list[str], desc_table: str | None):
+    """有描述表时按 doc_id left join，返回 (df, cols)。
+
+    left join 保证没有描述的图片不会从结果里消失（description 为 null）。
+    """
+    if not desc_table:
+        return df, cols
+    desc = _read_desc_table(desc_table)
+    return df.join(desc, on="doc_id", how="left"), [*cols, "description"]
+
+
+def scalar_query(
+    lance_uri: str,
+    where: str | None = None,
+    top_k: int = 100,
+    desc_table: str | None = None,
+) -> list[dict]:
     """标量过滤查询（过滤条件经 Daft 下推到 Lance scanner，不全表扫描）。"""
     import daft
 
@@ -51,12 +91,20 @@ def scalar_query(lance_uri: str, where: str | None = None, top_k: int = 100) -> 
     df = daft.read_lance(lance_uri, io_config=daft_io_config(), **kwargs)
     names = set(df.schema().column_names())
     cols = [c for c in DEFAULT_COLUMNS if c in names]
+    df, cols = _maybe_join_description(df.select(*cols), cols, desc_table)
     rows = df.select(*cols).limit(top_k).collect().to_pydict()
     return _rows_from_pydict(rows)
 
 
-def sql_query(lance_uri: str, sql: str, top_k: int = 100) -> list[dict]:
+def sql_query(
+    lance_uri: str,
+    sql: str,
+    top_k: int = 100,
+    desc_table: str | None = None,
+) -> list[dict]:
     """对图片表执行任意 Daft SQL SELECT（表在 SQL 里叫 ``images``）。
+
+    传入 desc_table 时，描述表以 ``descriptions`` 为名一并注册进 SQL 作用域。
 
     示例::
 
@@ -65,14 +113,17 @@ def sql_query(lance_uri: str, sql: str, top_k: int = 100) -> list[dict]:
         WHERE has_face = true AND is_blurry = false
         ORDER BY blur_score ASC
 
-        SELECT has_face, COUNT(*) AS cnt, AVG(blur_score) AS avg_blur
-        FROM images
-        GROUP BY has_face
+        SELECT i.doc_id, d.description
+        FROM images i LEFT JOIN descriptions d ON i.doc_id = d.doc_id
+        WHERE i.has_face = true
     """
     import daft
 
     images = daft.read_lance(lance_uri, io_config=daft_io_config())
-    rows = daft.sql(sql, images=images).limit(top_k).collect().to_pydict()
+    tables: dict = {"images": images}
+    if desc_table:
+        tables["descriptions"] = _read_desc_table(desc_table)
+    rows = daft.sql(sql, **tables).limit(top_k).collect().to_pydict()
     return _rows_from_pydict(rows)
 
 
@@ -82,6 +133,7 @@ def _vector_query(
     top_k: int = 10,
     where: str | None = None,
     distance_range: tuple[float, float] | None = None,
+    desc_table: str | None = None,
 ) -> list[dict]:
     import daft
     import pyarrow as pa
@@ -102,6 +154,9 @@ def _vector_query(
     df = daft.read_lance(lance_uri, io_config=daft_io_config(), default_scan_options=scan_options)
     names = set(df.schema().column_names())
     cols = [c for c in DEFAULT_COLUMNS if c in names]
+    # 先 select 收窄列再 join：ANN 结果只有 top_k 行，join 成本可忽略；
+    # 最后再 select 一次固定列序（join 可能改变列顺序）。
+    df, cols = _maybe_join_description(df.select(*cols), cols, desc_table)
     rows = df.select(*cols).limit(top_k).collect().to_pydict()
     return _rows_from_pydict(rows)
 
@@ -112,13 +167,14 @@ def text_query(
     top_k: int = 10,
     where: str | None = None,
     distance_range: tuple[float, float] | None = None,
+    desc_table: str | None = None,
 ) -> list[dict]:
     from multimodal_toolkit.image.embedding import get_embedder
 
     q_vec = get_embedder().embed_text(text)
     if q_vec is None:
         raise ValueError("text query is empty")
-    return _vector_query(lance_uri, q_vec, top_k, where, distance_range)
+    return _vector_query(lance_uri, q_vec, top_k, where, distance_range, desc_table)
 
 
 def image_path_query(
@@ -127,6 +183,7 @@ def image_path_query(
     top_k: int = 10,
     where: str | None = None,
     distance_range: tuple[float, float] | None = None,
+    desc_table: str | None = None,
 ) -> list[dict]:
     from multimodal_toolkit.image.embedding import get_embedder
 
@@ -134,7 +191,7 @@ def image_path_query(
         q_vec = get_embedder().embed_image_bytes(fp.read())
     if q_vec is None:
         raise ValueError(f"image query cannot be embedded: {image_path}")
-    return _vector_query(lance_uri, q_vec, top_k, where, distance_range)
+    return _vector_query(lance_uri, q_vec, top_k, where, distance_range, desc_table)
 
 
 def image_doc_query(
@@ -143,6 +200,7 @@ def image_doc_query(
     top_k: int = 10,
     where: str | None = None,
     distance_range: tuple[float, float] | None = None,
+    desc_table: str | None = None,
 ) -> list[dict]:
     import daft
 
@@ -159,7 +217,7 @@ def image_doc_query(
     )
     if not query_rows.get("image_embedding") or query_rows["image_embedding"][0] is None:
         raise ValueError(f"query_doc_id not found or has null image_embedding: {query_doc_id}")
-    return _vector_query(lance_uri, query_rows["image_embedding"][0], top_k, where, distance_range)
+    return _vector_query(lance_uri, query_rows["image_embedding"][0], top_k, where, distance_range, desc_table)
 
 
 def run(
@@ -171,17 +229,18 @@ def run(
     image_path: str | None = None,
     image_from: str | None = None,
     distance_range: tuple[float, float] | None = None,
+    desc_table: str | None = None,
 ) -> None:
     if sql:
-        results = sql_query(lance_uri, sql, top_k)
+        results = sql_query(lance_uri, sql, top_k, desc_table)
     elif text:
-        results = text_query(lance_uri, text, top_k, where, distance_range)
+        results = text_query(lance_uri, text, top_k, where, distance_range, desc_table)
     elif image_path:
-        results = image_path_query(lance_uri, image_path, top_k, where, distance_range)
+        results = image_path_query(lance_uri, image_path, top_k, where, distance_range, desc_table)
     elif image_from:
-        results = image_doc_query(lance_uri, image_from, top_k, where, distance_range)
+        results = image_doc_query(lance_uri, image_from, top_k, where, distance_range, desc_table)
     else:
-        results = scalar_query(lance_uri, where, top_k)
+        results = scalar_query(lance_uri, where, top_k, desc_table)
     for row in results:
         print(row)
 
@@ -197,6 +256,11 @@ def main() -> None:
     parser.add_argument("--image-from", help="doc_id in the image table to use as a similarity query")
     parser.add_argument("--distance-min", type=float, help="minimum vector distance for ANN results")
     parser.add_argument("--distance-max", type=float, help="maximum vector distance for ANN results")
+    parser.add_argument(
+        "--desc-table",
+        help="description table (doc_id, description) as parquet/jsonl/csv/lance; "
+        "left-joined into results, and registered as `descriptions` for --sql",
+    )
     args = parser.parse_args()
     vector_modes = [bool(args.text), bool(args.image_path), bool(args.image_from)]
     if sum(vector_modes) > 1:
@@ -219,6 +283,7 @@ def main() -> None:
         args.image_path,
         args.image_from,
         distance_range,
+        args.desc_table,
     )
 
 
