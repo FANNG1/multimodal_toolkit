@@ -107,6 +107,14 @@ def test_embed_image_bytes_tolerates_undecodable_bytes():
     assert embedder.embed_image_bytes(b"not an image") is None
 
 
+def test_normalize_flattens_model_output_shape():
+    from multimodal_toolkit.image.embedding import _normalize
+
+    vec = _normalize(np.ones((1, 512), dtype=np.float32))
+    assert len(vec) == 512
+    assert np.isclose(np.linalg.norm(np.asarray(vec, dtype=np.float32)), 1.0)
+
+
 def test_analyze_without_embed_rejects_lance_output(tmp_path):
     from multimodal_toolkit.image.workflow.analyze import run as analyze_run
 

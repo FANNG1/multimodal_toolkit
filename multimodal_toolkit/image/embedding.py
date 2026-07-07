@@ -8,7 +8,11 @@ from . import config
 
 
 def _normalize(vec: np.ndarray) -> list[float]:
-    vec = vec.astype("float32")
+    vec = np.asarray(vec, dtype="float32").reshape(-1)
+    if vec.size != config.IMAGE_EMBED_DIM:
+        raise ValueError(
+            f"Embedding dimension mismatch: got {vec.size}, expected {config.IMAGE_EMBED_DIM}"
+        )
     norm = float(np.linalg.norm(vec))
     if norm > 0:
         vec = vec / norm
@@ -56,7 +60,7 @@ class ChineseClipEmbedder:
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
         with self._torch.no_grad():
             features = self._model.get_image_features(**inputs)
-        return _normalize(features[0].detach().cpu().numpy())
+        return _normalize(features.pooler_output[0].detach().cpu().numpy())
 
     def embed_text(self, text: str | None) -> list[float] | None:
         if not text:
@@ -65,7 +69,7 @@ class ChineseClipEmbedder:
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
         with self._torch.no_grad():
             features = self._model.get_text_features(**inputs)
-        return _normalize(features[0].detach().cpu().numpy())
+        return _normalize(features.pooler_output[0].detach().cpu().numpy())
 
 
 _EMBEDDER: ChineseClipEmbedder | None = None

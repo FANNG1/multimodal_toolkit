@@ -42,7 +42,20 @@ def build_embedding_index(
     )
     if index_type in ("IVF_PQ", "IVF_HNSW_PQ"):
         kwargs["num_sub_vectors"] = num_sub_vectors
-    lance_ray.create_index(lance_uri, **kwargs)
+    try:
+        lance_ray.create_index(lance_uri, **kwargs)
+    except Exception as exc:
+        print(f"[warn] lance_ray index build failed; falling back to pylance: {exc}")
+        fallback_kwargs: dict = dict(
+            index_type=index_type,
+            replace=True,
+            num_partitions=num_partitions,
+            sample_rate=sample_rate,
+            storage_options=storage_options,
+        )
+        if index_type in ("IVF_PQ", "IVF_HNSW_PQ"):
+            fallback_kwargs["num_sub_vectors"] = num_sub_vectors
+        ds.create_index(column, **fallback_kwargs)
     print(f"[ok] built {index_type} index on {column} ({num_partitions} partitions): {lance_uri}")
 
 

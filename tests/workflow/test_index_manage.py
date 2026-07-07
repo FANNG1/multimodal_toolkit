@@ -123,6 +123,43 @@ def test_build_embedding_index_uses_lance_ray(monkeypatch, lance_uri):
     ]
 
 
+def test_build_embedding_index_falls_back_to_pylance(monkeypatch):
+    calls = []
+
+    class FakeSchema:
+        names = ["audio_embedding"]
+
+    class FakeDataset:
+        schema = FakeSchema()
+
+        def create_index(self, column, **kwargs):
+            calls.append((column, kwargs))
+
+    def fake_create_index(uri, **kwargs):
+        raise RuntimeError("ray worker failed")
+
+    monkeypatch.setattr(
+        "multimodal_toolkit.workflow.index.lance.dataset",
+        lambda *args, **kwargs: FakeDataset(),
+    )
+    monkeypatch.setattr("multimodal_toolkit.workflow.index.lance_ray.create_index", fake_create_index)
+
+    build_embedding_index("table.lance", num_partitions=1, sample_rate=2, index_type="IVF_FLAT")
+
+    assert calls == [
+        (
+            "audio_embedding",
+            {
+                "index_type": "IVF_FLAT",
+                "replace": True,
+                "num_partitions": 1,
+                "sample_rate": 2,
+                "storage_options": None,
+            },
+        )
+    ]
+
+
 def test_build_embedding_index_missing_column(lance_uri_no_embedding):
     with pytest.raises(ValueError, match="audio_embedding column not found"):
         build_embedding_index(lance_uri_no_embedding)
