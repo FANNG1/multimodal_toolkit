@@ -100,6 +100,40 @@ def test_analyze_failed_rows_have_null_verdicts(pipeline):
         assert rows[doc]["blur_score"] is None
 
 
+def test_analyze_embed_writes_lance_staging(monkeypatch, tmp_path):
+    import daft
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from skimage import data
+
+    import multimodal_toolkit.image.embedding as embedding
+    from multimodal_toolkit.image.workflow.analyze import run as analyze_run
+
+    class FakeEmbedder:
+        def embed_image_bytes(self, image_bytes):
+            return [1.0] + [0.0] * 511 if image_bytes else None
+
+    monkeypatch.setattr(embedding, "get_embedder", lambda: FakeEmbedder())
+
+    img_path = tmp_path / "tiny.jpg"
+    cv2.imwrite(str(img_path), cv2.cvtColor(data.astronaut(), cv2.COLOR_RGB2BGR))
+    manifest = tmp_path / "manifest.parquet"
+    pq.write_table(pa.table({"doc_id": ["tiny.jpg"], "s3_url": [str(img_path)]}), manifest)
+
+    out = tmp_path / "staging.lance"
+    analyze_run(str(manifest), str(out), embed=True)
+    rows = daft.read_lance(str(out)).select("doc_id", "image_embedding").collect().to_pydict()
+    assert rows["doc_id"] == ["tiny.jpg"]
+    assert len(rows["image_embedding"][0]) == 512
+
+
+def test_analyze_embed_rejects_json_output(tmp_path):
+    from multimodal_toolkit.image.workflow.analyze import run as analyze_run
+
+    with pytest.raises(ValueError, match=".lance"):
+        analyze_run(str(tmp_path / "manifest.parquet"), str(tmp_path / "analysis.jsonl"), embed=True)
+
+
 # ---------------------------------------------------------------------------
 # Stage 2 — ingest into lance
 # ---------------------------------------------------------------------------

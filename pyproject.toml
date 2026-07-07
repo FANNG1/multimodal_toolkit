@@ -15,6 +15,7 @@ dependencies = [
   "onnxruntime",
   "opencv-python-headless",
   "openai",
+  "pillow",
   "pyarrow",
   "pylance>=8.0.0",
   "python-dotenv",

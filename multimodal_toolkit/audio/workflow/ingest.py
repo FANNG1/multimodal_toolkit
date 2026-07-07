@@ -14,15 +14,7 @@ from daft import col, lit
 from daft.functions import download
 
 from ...storage.blob import validate_blob_v2
-from ...storage.io import configure_daft_runner, daft_io_config, lance_write_mode
-
-
-def _read_analysis(path: str, io_config) -> daft.DataFrame:
-    """Detect format by extension: .jsonl/.json → read_json, else → read_lance."""
-    low = path.rstrip("/").lower()
-    if low.endswith(".jsonl") or low.endswith(".ndjson") or low.endswith(".json"):
-        return daft.read_json(path, io_config=io_config)
-    return daft.read_lance(path, io_config=io_config)
+from ...storage.io import configure_daft_runner, daft_io_config, lance_write_mode, read_analysis_output
 
 
 def run(analysis_path: str, lance_uri: str) -> None:
@@ -31,7 +23,7 @@ def run(analysis_path: str, lance_uri: str) -> None:
 
     now = datetime.now(timezone.utc)
 
-    df = _read_analysis(analysis_path, io_config)
+    df = read_analysis_output(analysis_path, io_config)
 
     df = df.with_column(
         "audio_blob", download(col("s3_url"), on_error="null", io_config=io_config)

@@ -51,6 +51,28 @@ def lance_write_mode(uri: str) -> str:
     return "append"
 
 
+def read_analysis_output(path: str, io_config):
+    """Read Stage 1 analysis output as JSON or a Lance staging table.
+
+    JSON extensions are unambiguous. Everything else is treated as Lance so
+    S3 staging URIs do not need a `.lance` suffix. For local no-extension
+    paths, detect Lance by the `_versions` directory and otherwise preserve
+    existing JSON directory behavior.
+    """
+    from pathlib import Path
+
+    import daft
+
+    low = path.rstrip("/").lower()
+    if low.endswith(".jsonl") or low.endswith(".ndjson") or low.endswith(".json"):
+        return daft.read_json(path, io_config=io_config)
+    if low.endswith(".lance"):
+        return daft.read_lance(path, io_config=io_config)
+    if not low.startswith("s3://") and not Path(path, "_versions").exists():
+        return daft.read_json(path, io_config=io_config)
+    return daft.read_lance(path, io_config=io_config)
+
+
 def configure_daft_runner() -> None:
     """Switch Daft to the Ray runner when USE_RAY=1, otherwise leave the default (native)."""
     from .. import config

@@ -8,7 +8,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from multimodal_toolkit.storage.io import lance_storage_options, lance_write_mode, read_manifest
+from multimodal_toolkit.storage.io import (
+    daft_io_config,
+    lance_storage_options,
+    lance_write_mode,
+    read_analysis_output,
+    read_manifest,
+)
 
 ROWS = {"doc_id": ["a.jpg", "b.jpg"], "s3_url": ["s3://bkt/a.jpg", "s3://bkt/b.jpg"]}
 
@@ -80,3 +86,25 @@ def test_lance_write_mode_reraises_non_missing_value_error(monkeypatch):
     monkeypatch.setattr(lance, "dataset", _raise_value_error)
     with pytest.raises(ValueError, match="credential refresh failed"):
         storage_io.lance_write_mode("s3://bucket/table.lance")
+
+
+def test_read_analysis_output_lance_suffix_uses_lance_reader(monkeypatch, tmp_path):
+    import daft
+
+    calls = []
+
+    def fake_read_lance(path, io_config=None):
+        calls.append(("lance", path, io_config))
+        return "lance-df"
+
+    def fake_read_json(path, io_config=None):
+        calls.append(("json", path, io_config))
+        return "json-df"
+
+    monkeypatch.setattr(daft, "read_lance", fake_read_lance)
+    monkeypatch.setattr(daft, "read_json", fake_read_json)
+
+    io_config = daft_io_config()
+    path = str(tmp_path / "missing.lance")
+    assert read_analysis_output(path, io_config) == "lance-df"
+    assert calls == [("lance", path, io_config)]

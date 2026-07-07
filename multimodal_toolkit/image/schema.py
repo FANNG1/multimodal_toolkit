@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pyarrow as pa
 
+from . import config
+
 IMAGE_ASSET_SCHEMA = pa.schema(
     [
         pa.field("doc_id", pa.utf8()),
@@ -19,5 +21,6 @@ IMAGE_ASSET_SCHEMA = pa.schema(
         pa.field("has_face", pa.bool_()),
         pa.field("is_blurry", pa.bool_()),
         pa.field("is_face_blurry", pa.bool_()),
+        pa.field("image_embedding", pa.list_(pa.float32(), config.IMAGE_EMBED_DIM)),
     ]
 )
