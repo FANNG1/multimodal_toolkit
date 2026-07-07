@@ -44,7 +44,14 @@ class ChineseClipEmbedder:
     def embed_image_bytes(self, image_bytes: bytes | None) -> list[float] | None:
         if not image_bytes:
             return None
-        image = _bytes_to_pil(image_bytes)
+        # cv2 能解码的图 PIL 不一定能打开（典型：截断的 JPEG），所以上游的
+        # status="ok" 不保证这里解码成功。解不开返回 None（embedding 落 null），
+        # 与"坏图不丢行"的管道约定一致，不让一张坏图打断整个批次。
+        # 只包解码这一步：模型/设备层面的错误仍然照常抛出。
+        try:
+            image = _bytes_to_pil(image_bytes)
+        except Exception:
+            return None
         inputs = self._processor(images=image, return_tensors="pt")
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
         with self._torch.no_grad():
