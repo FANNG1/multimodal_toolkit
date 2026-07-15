@@ -28,8 +28,8 @@ from daft.functions import download, regexp_replace, when
 from daft.functions.ai import prompt as llm_prompt
 
 from .. import config
+from ..llm import validate_llm_responses
 from ..udfs import (
-    ANALYSIS_DTYPE,
     AsrUDF,
     duration_udf,
     prompt_udf,
@@ -167,12 +167,13 @@ def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
     else:
         df = df.with_column("analysis_json", daft.lit(None).cast(daft.DataType.string()))
 
-    # Parse the LLM's JSON into typed columns. try_deserialize yields null on
-    # malformed JSON, so one bad LLM response never fails the batch.
+    # 在 Python batch UDF 里严格校验 LLM JSON，再生成 typed struct。不能用
+    # try_deserialize：Daft 0.7.15 遇到合法 JSON 中的类型错误会抛批次级异常，
+    # 而缺字段对象会生成非 null struct，两个行为都会破坏 llm_failed 语义。
     # 结论列不做 fill_null：null 就是"LLM 没给出结论"（没配 key、请求失败、
     # JSON 不合法），填 False/'其他'/0.0 会把"没处理"伪装成"判定为否"，
     # 真实降档通话会被静默漏报。
-    df = df.with_column("analysis", col("analysis_json").try_deserialize("json", ANALYSIS_DTYPE))
+    df = df.with_column("analysis", validate_llm_responses(col("analysis_json")))
     df = (
         df.with_column("downgrade_related", col("analysis")["downgrade_related"])
         .with_column("primary_reason", col("analysis")["primary_reason"])
@@ -191,10 +192,23 @@ def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
         df = df.with_column(
             "status",
             when(
-                (col("status") == "ok") & col("analysis").is_null(), "llm_failed"
+                (col("status") == "ok")
+                & col("analysis")["downgrade_related"].is_null(),
+                "llm_failed",
             ).otherwise(col("status")),
         )
     return df
+
+
+def _embedding_input(audio_bytes, status):
+    """只按音频本身是否可分析决定 embedding 输入。
+
+    llm_failed 表示音频下载、解码和时长门控均已通过，只是外部 LLM 没有给出
+    合法结论；声学 embedding 与 LLM 独立，必须继续计算，避免可用音频从 ANN
+    索引中静默消失。
+    """
+    media_ready = (status == "ok") | (status == "llm_failed")
+    return when(media_ready, audio_bytes)
 
 
 def run(manifest: str, out_path: str, embed: bool = False) -> None:
@@ -205,11 +219,11 @@ def run(manifest: str, out_path: str, embed: bool = False) -> None:
 
     if embed:
         embed_udf = _EmbedUDF()
-        # 只嵌入 ok 行：decode_failed 的坏字节会让 soundfile 在 embedder
-        # 里直接抛异常，duration_filtered 的行也不该花嵌入成本。
+        # 下载/解码失败和时长过滤行不做 embedding；llm_failed 的音频本身
+        # 已通过媒体门控，声学 embedding 不依赖 LLM，仍应正常计算。
         df = df.with_column(
             "audio_embedding",
-            embed_udf(when(col("status") == "ok", col("audio_bytes"))),
+            embed_udf(_embedding_input(col("audio_bytes"), col("status"))),
         )
         output = df.select(*_BASE_OUTPUT_COLS, "audio_embedding")
         output.write_lance(

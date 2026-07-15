@@ -42,3 +42,26 @@ def test_prompt_udf_null_transcript_skips_llm():
     assert out[0] is None
     assert out[1] is not None
     assert out[2] is not None and "8元套餐" in out[2]
+
+
+def test_embedding_input_keeps_llm_failed_audio():
+    """LLM 失败不影响独立的声学 embedding，只跳过媒体本身不可用的行。"""
+    from multimodal_toolkit.audio.workflow.analyze import _embedding_input
+
+    df = daft.from_pydict(
+        {
+            "audio_bytes": [b"ok", b"llm-failed", b"missing", b"bad", b"filtered"],
+            "status": [
+                "ok",
+                "llm_failed",
+                "download_failed",
+                "decode_failed",
+                "duration_filtered",
+            ],
+        }
+    )
+    out = df.select(
+        _embedding_input(df["audio_bytes"], df["status"]).alias("embedding_input")
+    ).to_pydict()["embedding_input"]
+
+    assert out == [b"ok", b"llm-failed", None, None, None]
