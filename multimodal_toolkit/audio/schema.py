@@ -8,6 +8,9 @@ AUDIO_ASSET_SCHEMA = pa.schema(
     [
         pa.field("doc_id", pa.utf8()),
         pa.field("s3_url", pa.utf8()),
+        # 处理状态：ok / download_failed / decode_failed / duration_filtered /
+        # llm_failed / blob_download_failed。非 ok 行的转写和打标列为 null。
+        pa.field("status", pa.utf8()),
         pa.field("audio_blob", pa.large_binary()),  # written as lance blob v2 at ingest time
         pa.field("ingest_time", pa.timestamp("us", tz="UTC")),
         pa.field("audio_embedding", pa.list_(pa.float32(), config.EMBED_DIM)),

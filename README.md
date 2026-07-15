@@ -23,7 +23,10 @@ Manifest (parquet / jsonl / csv)
   doc_id, s3_url
        │
        ▼  Stage 1 — audio/workflow/analyze.py
-       │  Daft: read manifest → download audio bytes → duration filter
+       │  Daft: read manifest → download audio bytes → duration gate
+       │        (rows are never dropped: failures are kept with a status
+       │         column — download_failed / decode_failed / duration_filtered
+       │         / llm_failed — and null analysis fields)
        │        → SenseVoice ASR (transcript + acoustic_emotion)
        │        → PII redaction (ID card, phone numbers)
        │        → DeepSeek LLM (downgrade_related, bad_tone, emotion_score …)
@@ -40,7 +43,7 @@ Manifest (parquet / jsonl / csv)
                 │        → validate blob v2
                 │
                 ▼  Lance asset table  (blob v2, local or S3)
-                │  columns: doc_id, s3_url, audio_blob,
+                │  columns: doc_id, s3_url, status, audio_blob,
                 │           transcript, acoustic_emotion,
                 │           downgrade_related, primary_reason,
                 │           secondary_reason, summary, confidence,
@@ -103,6 +106,11 @@ EMBED_BACKEND=signal    # signal (128-dim RMS+ZCR) or wav2vec2
 # Daft runner
 USE_RAY=0               # set to 1 to use Ray for Daft-backed steps
 RAY_ADDRESS=            # leave empty to start/join local Ray
+
+# Daft's native S3 writes honor HTTP_PROXY/HTTPS_PROXY; when a proxy is set,
+# keep local MinIO traffic off it or multipart uploads fail with 400
+NO_PROXY=127.0.0.1,localhost
+no_proxy=127.0.0.1,localhost
 ```
 
 ### Tuning for large Ray runs
@@ -440,7 +448,10 @@ create the unified asset table once, then local and LLM batches can share it.
 The default `--num-partitions 16` requires at least 4096 rows. For tables with fewer rows, pass `--num-partitions 1` (or skip `--embedding` and rely on scalar queries only).
 
 **DeepSeek key absent → LLM columns are null.**  
-If `DEEPSEEK_API_KEY` is not set, `downgrade_related`, `bad_tone`, `primary_reason`, `summary`, `confidence`, `text_emotion`, and `emotion_score` are all `null`. ASR and acoustic embeddings still run normally.
+If `DEEPSEEK_API_KEY` is not set, `downgrade_related`, `bad_tone`, `primary_reason`, `summary`, `confidence`, `text_emotion`, and `emotion_score` are all `null` (`status` stays `ok`). ASR and acoustic embeddings still run normally. When the key **is** set but a call fails or returns unparsable JSON, the row is kept with `status = 'llm_failed'` and null LLM columns — a null verdict always means "not judged", never "judged no".
+
+**Audio rows are never dropped.**  
+Like the image pipeline, every audio manifest entry produces exactly one output row. Failures are marked in the `status` column (`ok` / `download_failed` / `decode_failed` / `duration_filtered` / `llm_failed`, plus `blob_download_failed` stamped at ingest when a Stage-1-ok object has disappeared before Stage 2), with null transcript/verdict columns. Rows outside `[MIN_DURATION_S, MAX_DURATION_S]` keep their measured `duration_s` but skip ASR/LLM/embedding.
 
 **Blob v2 is validated after every ingest.**  
 `validate_blob_v2` raises immediately if Lance silently downgraded `audio_blob` to `large_binary`. Never skip this check when testing new library versions.

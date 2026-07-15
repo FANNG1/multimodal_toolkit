@@ -11,6 +11,11 @@ Output format depends on --embed flag:
   default (no embed)  →  JSONL on S3  (scalar fields, embeddable in downstream JSON pipelines)
   --embed             →  Lance staging table on S3  (fixed-size vector cannot be stored in JSON)
 
+manifest 里的每个条目都对应输出中的一行——下载失败、解码失败、被时长过滤、
+LLM 打标失败的通话不会被丢弃，而是通过 status 列标记（ok / download_failed /
+decode_failed / duration_filtered / llm_failed），转写和打标结论为 null。
+合规场景必须能区分"通话有问题"和"根本没处理"。
+
 The output always includes s3_url so Stage 2 (ingest.py) can download the audio blob.
 """
 from __future__ import annotations
@@ -19,7 +24,7 @@ import argparse
 
 import daft
 from daft import col
-from daft.functions import download, regexp_replace
+from daft.functions import download, regexp_replace, when
 from daft.functions.ai import prompt as llm_prompt
 
 from .. import config
@@ -46,6 +51,7 @@ _PHONE_PAT = r"1[3-9]\d{9}"
 _BASE_OUTPUT_COLS = [
     "doc_id",
     "s3_url",
+    "status",
     "duration_s",
     "transcript",
     "acoustic_emotion",
@@ -93,19 +99,34 @@ def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
     df = df.with_column(
         "audio_bytes", download(col("s3_url"), on_error="null", io_config=io_config)
     )
-    df = df.where(~col("audio_bytes").is_null())
 
-    # Duration gate: drop clips too short to analyse or too long to afford.
+    # manifest 里的每个条目都对应输出中的一行——下载失败、解码失败、被时长
+    # 过滤的音频不会被丢弃，而是通过 status 列标记，转写和打标结论为 null。
+    # 合规场景必须能区分"通话有问题"和"根本没处理"。duration_udf 对坏字节
+    # 返回 null，所以 duration 为 null 即 decode_failed；时长超出
+    # [MIN_DURATION_S, MAX_DURATION_S] 的行标 duration_filtered（太短没有
+    # 分析价值，太长成本不可控），duration_s 本身保留。
     df = df.with_column("duration_s", duration_udf(col("audio_bytes")))
-    df = df.where(
-        (col("duration_s") >= config.MIN_DURATION_S)
-        & (col("duration_s") <= config.MAX_DURATION_S)
+    df = df.with_column(
+        "status",
+        when(col("audio_bytes").is_null(), "download_failed")
+        .when(col("duration_s").is_null(), "decode_failed")
+        .when(
+            (col("duration_s") < config.MIN_DURATION_S)
+            | (col("duration_s") > config.MAX_DURATION_S),
+            "duration_filtered",
+        )
+        .otherwise("ok"),
     )
 
     # ASR = automatic speech recognition. SenseVoice returns the transcript
     # plus an acoustic emotion label (angry/sad/... inferred from tone, not words).
+    # 非 ok 行传 null 字节进 UDF，ASR 返回 null struct，昂贵的模型推理只花在
+    # 真正要分析的行上。
     asr = AsrUDF()
-    df = df.with_column("asr", asr(col("audio_bytes"), col("doc_id")))
+    df = df.with_column(
+        "asr", asr(when(col("status") == "ok", col("audio_bytes")), col("doc_id"))
+    )
     df = df.with_column("transcript_raw", col("asr")["transcript"])
     df = df.with_column("acoustic_emotion", col("asr")["acoustic_emotion"])
 
@@ -122,20 +143,19 @@ def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
 
     # LLM tagging: build the instruction (audio/prompt.py), ask DeepSeek for a
     # JSON object with the business fields. Skipped when no API key is set —
-    # those columns then fall back to the fill_null defaults below.
+    # those columns then stay null（"没打标"，不是"判定为否"）。
+    # 非 ok 行 transcript 为 null，prompt_udf 返回 null，LLM 不会收到请求。
     df = df.with_column("prompt", prompt_udf(col("transcript"), col("acoustic_emotion")))
     if config.DEEPSEEK_API_KEY:
-        from daft.ai.openai.provider import OpenAIProvider
+        # 不直接用 OpenAIProvider：Daft 0.7.15 会把 on_error/concurrency 泄漏进
+        # OpenAI 请求 kwargs 导致每行 TypeError，适配层见 audio/llm.py。
+        from ..llm import get_audio_llm_provider
 
-        provider = OpenAIProvider(
-            base_url=config.DEEPSEEK_BASE_URL,
-            api_key=config.DEEPSEEK_API_KEY,
-        )
         df = df.with_column(
             "analysis_json",
             llm_prompt(
                 col("prompt"),
-                provider=provider,
+                provider=get_audio_llm_provider(),
                 model=config.DEEPSEEK_MODEL,
                 use_chat_completions=True,
                 response_format={"type": "json_object"},
@@ -148,19 +168,32 @@ def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
         df = df.with_column("analysis_json", daft.lit(None).cast(daft.DataType.string()))
 
     # Parse the LLM's JSON into typed columns. try_deserialize yields null on
-    # malformed JSON, and fill_null supplies a safe default per field, so one
-    # bad LLM response never fails the batch.
+    # malformed JSON, so one bad LLM response never fails the batch.
+    # 结论列不做 fill_null：null 就是"LLM 没给出结论"（没配 key、请求失败、
+    # JSON 不合法），填 False/'其他'/0.0 会把"没处理"伪装成"判定为否"，
+    # 真实降档通话会被静默漏报。
     df = df.with_column("analysis", col("analysis_json").try_deserialize("json", ANALYSIS_DTYPE))
     df = (
-        df.with_column("downgrade_related", col("analysis")["downgrade_related"].fill_null(False))
-        .with_column("primary_reason", col("analysis")["primary_reason"].fill_null("其他"))
-        .with_column("secondary_reason", col("analysis")["secondary_reason"].fill_null(""))
-        .with_column("summary", col("analysis")["summary"].fill_null(""))
-        .with_column("confidence", col("analysis")["confidence"].fill_null(0.0))
-        .with_column("text_emotion", col("analysis")["text_emotion"].fill_null("未知"))
-        .with_column("bad_tone", col("analysis")["bad_tone"].fill_null(False))
-        .with_column("emotion_score", col("analysis")["emotion_score"].fill_null(0.0))
+        df.with_column("downgrade_related", col("analysis")["downgrade_related"])
+        .with_column("primary_reason", col("analysis")["primary_reason"])
+        .with_column("secondary_reason", col("analysis")["secondary_reason"])
+        .with_column("summary", col("analysis")["summary"])
+        .with_column("confidence", col("analysis")["confidence"])
+        .with_column("text_emotion", col("analysis")["text_emotion"])
+        .with_column("bad_tone", col("analysis")["bad_tone"])
+        .with_column("emotion_score", col("analysis")["emotion_score"])
     )
+
+    # 配了 key 却没有得到可解析结果的 ok 行标 llm_failed——区别于"没配 key
+    # 整批跳过"（status 保持 ok、结论列全 null）。只升级 ok 行：download/
+    # decode/duration 状态是更早的失败原因，不能被覆盖。
+    if config.DEEPSEEK_API_KEY:
+        df = df.with_column(
+            "status",
+            when(
+                (col("status") == "ok") & col("analysis").is_null(), "llm_failed"
+            ).otherwise(col("status")),
+        )
     return df
 
 
@@ -172,7 +205,12 @@ def run(manifest: str, out_path: str, embed: bool = False) -> None:
 
     if embed:
         embed_udf = _EmbedUDF()
-        df = df.with_column("audio_embedding", embed_udf(col("audio_bytes")))
+        # 只嵌入 ok 行：decode_failed 的坏字节会让 soundfile 在 embedder
+        # 里直接抛异常，duration_filtered 的行也不该花嵌入成本。
+        df = df.with_column(
+            "audio_embedding",
+            embed_udf(when(col("status") == "ok", col("audio_bytes"))),
+        )
         output = df.select(*_BASE_OUTPUT_COLS, "audio_embedding")
         output.write_lance(
             out_path,
