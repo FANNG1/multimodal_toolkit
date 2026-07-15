@@ -11,9 +11,10 @@
    消息分发器（0.7.15 里一个 None 能带崩整个 morsel），也不该浪费一次 API
    调用；prompter 对含 null 的输入直接返回 null。
 
-历史教训：这个 bug 在 fill_null 缺省值时代完全不可见——每行都失败，但
-输出全是 downgrade_related=False，看起来像"LLM 判定为否"。结论列保持
-null + status=llm_failed 之后它才第一次暴露出来。
+历史教训：llm_prompt 的 concurrency/on_error 参数是 #18 引入的，引入即
+触发泄漏、每行失败，但当时结论列有 fill_null 缺省值兜底——输出全是
+downgrade_related=False，看起来像"LLM 判定为否"，回归完全不可见。
+结论列保持 null + status=llm_failed 之后它才第一次暴露出来。
 """
 from __future__ import annotations
 
