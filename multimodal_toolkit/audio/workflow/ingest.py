@@ -11,11 +11,41 @@ from datetime import datetime, timezone
 
 import daft
 from daft import col, lit
-from daft.functions import download
+from daft.functions import download, when
 
 from ... import config
 from ...storage.blob import validate_blob_v2
 from ...storage.io import configure_daft_runner, daft_io_config, lance_write_mode, read_analysis_output
+
+# JSONL 分析结果靠类型推断读入：某列在整个批次里全为 null 时（比如整批
+# 没配 DEEPSEEK_API_KEY 导致打标列全空，或全批次 download_failed），推断
+# 出来的是 null 类型。直接落 Lance 会建出 null 类型的列，后续正常批次
+# append 时类型冲突、永远写不进去。这里记录每列的规范类型（即正常批次
+# JSON 推断会得到的类型），把全 null 的列显式 cast 回去。
+_ANALYSIS_COLUMN_DTYPES = {
+    "doc_id": daft.DataType.string(),
+    "s3_url": daft.DataType.string(),
+    "status": daft.DataType.string(),
+    "duration_s": daft.DataType.float64(),
+    "transcript": daft.DataType.string(),
+    "acoustic_emotion": daft.DataType.string(),
+    "downgrade_related": daft.DataType.bool(),
+    "primary_reason": daft.DataType.string(),
+    "secondary_reason": daft.DataType.string(),
+    "summary": daft.DataType.string(),
+    "confidence": daft.DataType.float64(),
+    "text_emotion": daft.DataType.string(),
+    "bad_tone": daft.DataType.bool(),
+    "emotion_score": daft.DataType.float64(),
+}
+
+
+def _cast_all_null_columns(df: daft.DataFrame) -> daft.DataFrame:
+    for field in df.schema():
+        dtype = _ANALYSIS_COLUMN_DTYPES.get(field.name)
+        if dtype is not None and field.dtype == daft.DataType.null():
+            df = df.with_column(field.name, col(field.name).cast(dtype))
+    return df
 
 
 def run(analysis_path: str, lance_uri: str) -> None:
@@ -25,11 +55,25 @@ def run(analysis_path: str, lance_uri: str) -> None:
     now = datetime.now(timezone.utc)
 
     df = read_analysis_output(analysis_path, io_config)
+    df = _cast_all_null_columns(df)
 
+    # 重新按 s3_url 下载音频字节作为 blob 列（Stage 1 输出不带原始字节）。
+    # 下载失败的行（含 Stage 1 标记为 download_failed 的）blob 为 null，
+    # 但行本身保留——Lance 表是完整台账，status 列记录了失败原因。
     df = df.with_column(
         "audio_blob", download(col("s3_url"), on_error="null", io_config=io_config)
     )
-    df = df.where(~col("audio_blob").is_null())
+    # Stage 1 到 Stage 2 之间对象可能被删或失效：Stage 1 判为 ok 的行这次
+    # 下载不到字节时，改标 blob_download_failed，不能让台账里出现
+    # "status=ok 但没有 blob"的行。转写和打标列保持 Stage 1 的值——
+    # 分析本身是成功的，缺的只是归档字节。
+    df = df.with_column(
+        "status",
+        when(
+            (col("status") == "ok") & col("audio_blob").is_null(),
+            "blob_download_failed",
+        ).otherwise(col("status")),
+    )
     df = df.with_column(
         "ingest_time",
         lit(now).cast(daft.DataType.timestamp("us", "UTC")),
