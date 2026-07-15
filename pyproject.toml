@@ -8,6 +8,7 @@ dependencies = [
   "daft-lance>=0.4.0",
   "funasr",
   "getdaft",
+  "httpx",
   "insightface",
   "lance-ray",
   "modelscope",
@@ -16,6 +17,7 @@ dependencies = [
   "opencv-python-headless",
   "openai",
   "pillow",
+  "psutil",
   "pyarrow",
   "pylance<8.0.0",
   "python-dotenv",
@@ -29,8 +31,9 @@ dependencies = [
 [tool.pytest.ini_options]
 markers = [
   "ray: hard dependency on a local Ray cluster; excluded by default, run with `pytest -m ray`",
+  "benchmark_e2e: real MinIO + local Ray + SenseVoice benchmark; excluded by default",
 ]
-addopts = "-m 'not ray'"
+addopts = "-m 'not ray and not benchmark_e2e'"
 
 [build-system]
 requires = ["hatchling"]

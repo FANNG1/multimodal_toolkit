@@ -1,0 +1,1 @@
+"""Daft audio stability benchmark."""
