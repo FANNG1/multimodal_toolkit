@@ -10,7 +10,9 @@ IMAGE_ASSET_SCHEMA = pa.schema(
         pa.field("s3_url", pa.utf8()),
         pa.field("image_blob", pa.large_binary()),  # written as lance blob v2 at ingest time
         pa.field("ingest_time", pa.timestamp("us", tz="UTC")),
-        pa.field("status", pa.utf8()),  # ok / download_failed / decode_failed / blob_download_failed
+        pa.field(
+            "status", pa.utf8()
+        ),  # ok / download_failed / decode_failed / llm_failed / blob_download_failed
         pa.field("width", pa.int32()),
         pa.field("height", pa.int32()),
         pa.field("face_count", pa.int32()),
@@ -21,6 +23,11 @@ IMAGE_ASSET_SCHEMA = pa.schema(
         pa.field("has_face", pa.bool_()),
         pa.field("is_blurry", pa.bool_()),
         pa.field("is_face_blurry", pa.bool_()),
+        # Present only in tables created from Stage 1 --use-llm output.
+        pa.field("is_avatar", pa.bool_()),
+        pa.field("clarity_confidence", pa.float64()),
+        pa.field("avatar_confidence", pa.float64()),
+        pa.field("llm_reason", pa.utf8()),
         pa.field("image_embedding", pa.list_(pa.float32(), config.IMAGE_EMBED_DIM)),
     ]
 )
