@@ -40,6 +40,11 @@ _ANALYSIS_COLUMN_DTYPES = {
     "has_face": daft.DataType.bool(),
     "is_blurry": daft.DataType.bool(),
     "is_face_blurry": daft.DataType.bool(),
+    "is_avatar": daft.DataType.bool(),
+    "analysis_backend": daft.DataType.string(),
+    "clarity_confidence": daft.DataType.float64(),
+    "avatar_confidence": daft.DataType.float64(),
+    "llm_reason": daft.DataType.string(),
 }
 
 
@@ -79,7 +84,8 @@ def run(analysis_path: str, lance_uri: str) -> None:
 
     df = read_analysis_output(analysis_path, io_config)
     df = _cast_all_null_columns(df)
-    analysis_has_embedding = "image_embedding" in df.schema().column_names()
+    analysis_columns = set(df.schema().column_names())
+    analysis_has_embedding = "image_embedding" in analysis_columns
     mode = lance_write_mode(lance_uri)
     _validate_embedding_schema(lance_uri, mode, analysis_has_embedding)
 

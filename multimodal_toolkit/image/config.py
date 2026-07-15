@@ -15,7 +15,20 @@ FACE_DET_SCORE_MIN = float(os.getenv("FACE_DET_SCORE_MIN", "0.5"))
 MIN_FACE_RATIO = float(os.getenv("MIN_FACE_RATIO", "0.01"))
 BLUR_THRESHOLD = float(os.getenv("BLUR_THRESHOLD", "100.0"))
 FACE_BLUR_THRESHOLD = float(os.getenv("FACE_BLUR_THRESHOLD", "80.0"))
+AVATAR_MIN_FACE_RATIO = float(os.getenv("AVATAR_MIN_FACE_RATIO", "0.03"))
 
 IMAGE_EMBED_MODEL = os.getenv("IMAGE_EMBED_MODEL", "OFA-Sys/chinese-clip-vit-base-patch16")
 IMAGE_EMBED_DEVICE = os.getenv("IMAGE_EMBED_DEVICE", "cpu")
 IMAGE_EMBED_DIM = int(os.getenv("IMAGE_EMBED_DIM", "512"))
+
+# OpenAI-compatible visual language model. These are intentionally separate
+# from the audio DeepSeek settings: deepseek-chat is text-only, while this
+# endpoint must accept image content in Chat Completions messages.
+IMAGE_VLM_API_KEY = os.getenv("IMAGE_VLM_API_KEY", "")
+IMAGE_VLM_BASE_URL = os.getenv(
+    "IMAGE_VLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+)
+IMAGE_VLM_MODEL = os.getenv("IMAGE_VLM_MODEL", "")
+IMAGE_VLM_TIMEOUT_S = float(os.getenv("IMAGE_VLM_TIMEOUT_S", "60"))
+IMAGE_VLM_MAX_RETRIES = int(os.getenv("IMAGE_VLM_MAX_RETRIES", "2"))
+IMAGE_VLM_CONCURRENCY = int(os.getenv("IMAGE_VLM_CONCURRENCY", "1"))

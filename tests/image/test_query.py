@@ -36,6 +36,11 @@ ROWS = {
     "has_face": [True, False, True, True, None],
     "is_blurry": [False, True, False, True, None],
     "is_face_blurry": [False, False, False, True, None],
+    "is_avatar": [True, False, False, False, None],
+    "analysis_backend": ["local", "local", "llm", "llm", "local"],
+    "clarity_confidence": [None, None, 0.9, 0.8, None],
+    "avatar_confidence": [None, None, 0.2, 0.1, None],
+    "llm_reason": [None, None, "多人合影", "人脸模糊", None],
 }
 
 
@@ -53,6 +58,8 @@ def test_scalar_query_no_filter(lance_uri):
     assert "has_face" in rows[0]
     assert "blur_score" in rows[0]
     assert "status" in rows[0]
+    assert "is_avatar" in rows[0]
+    assert "analysis_backend" in rows[0]
 
 
 def test_scalar_query_where(lance_uri):

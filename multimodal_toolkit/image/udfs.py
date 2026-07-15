@@ -36,6 +36,14 @@ IMAGE_QUALITY_DTYPE = daft.DataType.struct(
     }
 )
 
+IMAGE_VLM_PREP_DTYPE = daft.DataType.struct(
+    {
+        "width": daft.DataType.int32(),
+        "height": daft.DataType.int32(),
+        "vlm_image_bytes": daft.DataType.binary(),
+    }
+)
+
 # 下载失败（输入为 null）或解码失败的图片返回这个全 null 行；
 # 下游据此生成 status 列，而不是把行丢掉。
 _NULL_ROW = {
@@ -106,3 +114,38 @@ class ImageQualityUDF:
                 }
             )
         return results
+
+
+@daft.func.batch(return_dtype=IMAGE_VLM_PREP_DTYPE)
+def prepare_image_for_vlm(image_bytes_col):
+    """Decode and bound image size before sending bytes to an external VLM.
+
+    The original dimensions are retained for the asset table. Invalid images
+    return a fully-null row so the workflow can distinguish decode failures
+    from API failures without invoking the local face detector.
+    """
+    import cv2
+
+    from multimodal_toolkit.image.quality import decode_image, resize_long_edge
+
+    results = []
+    for image_bytes in image_bytes_col.to_pylist():
+        img = decode_image(image_bytes)
+        if img is None:
+            results.append({"width": None, "height": None, "vlm_image_bytes": None})
+            continue
+
+        height, width = img.shape[:2]
+        resized, _ = resize_long_edge(img)
+        encoded, buf = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if not encoded:
+            results.append({"width": None, "height": None, "vlm_image_bytes": None})
+            continue
+        results.append(
+            {
+                "width": width,
+                "height": height,
+                "vlm_image_bytes": buf.tobytes(),
+            }
+        )
+    return results

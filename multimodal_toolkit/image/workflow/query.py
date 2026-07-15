@@ -30,6 +30,11 @@ DEFAULT_COLUMNS = [
     "has_face",
     "is_blurry",
     "is_face_blurry",
+    "is_avatar",
+    "analysis_backend",
+    "clarity_confidence",
+    "avatar_confidence",
+    "llm_reason",
 ]
 
 

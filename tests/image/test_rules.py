@@ -14,6 +14,7 @@ def _fixed_thresholds(monkeypatch):
     monkeypatch.setattr(config, "MIN_FACE_RATIO", 0.01)
     monkeypatch.setattr(config, "BLUR_THRESHOLD", 100.0)
     monkeypatch.setattr(config, "FACE_BLUR_THRESHOLD", 80.0)
+    monkeypatch.setattr(config, "AVATAR_MIN_FACE_RATIO", 0.03)
 
 
 def _rows(df: daft.DataFrame) -> dict:
@@ -48,9 +49,16 @@ def test_rule_columns():
     assert out["is_face_blurry"][by_id["clear_face"]] is False
     assert out["is_face_blurry"][by_id["no_face"]] is False  # null face_blur → False
 
+    assert out["is_avatar"][by_id["clear_face"]] is True
+    assert out["is_avatar"][by_id["low_score"]] is False
+    assert out["is_avatar"][by_id["tiny_face"]] is False
+    assert out["is_avatar"][by_id["blurry_face"]] is False
+    assert out["is_avatar"][by_id["no_face"]] is False
+
     # Failed rows get null verdicts, never False — "unknown" must stay
     # distinguishable from "judged no".
     for doc in ("bad_download", "bad_image"):
         assert out["has_face"][by_id[doc]] is None
         assert out["is_blurry"][by_id[doc]] is None
         assert out["is_face_blurry"][by_id[doc]] is None
+        assert out["is_avatar"][by_id[doc]] is None
