@@ -398,7 +398,9 @@ judgement. Local-only detector scores are null for LLM rows, while LLM confidenc
 and reason fields are null for local rows. A failed VLM call keeps the manifest row
 with `status = 'llm_failed'` and null verdicts. Daft 0.7.15 leaks its UDF `on_error`
 option into OpenAI request kwargs, so the workflow uses a small descriptor adapter
-that removes only the leaked request argument while retaining Daft's native prompt.
+that removes only leaked UDF request arguments and skips null images while retaining
+Daft's native prompt. Tables created before this unified schema are not migrated;
+create the unified asset table once, then local and LLM batches can share it.
 
 **IVF_PQ minimum row count.**  
 The default `--num-partitions 16` requires at least 4096 rows. For tables with fewer rows, pass `--num-partitions 1` (or skip `--embedding` and rely on scalar queries only).

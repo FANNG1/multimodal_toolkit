@@ -127,7 +127,7 @@ def _add_llm_analysis(df: daft.DataFrame) -> daft.DataFrame:
 
     from multimodal_toolkit.image.prompt import build_image_analysis_prompt
 
-    valid_images = df.where(~col("vlm_image_bytes").is_null()).with_column(
+    df = df.with_column(
         "llm_json",
         llm_prompt(
             [lit(build_image_analysis_prompt()), col("vlm_image_bytes")],
@@ -141,13 +141,6 @@ def _add_llm_analysis(df: daft.DataFrame) -> daft.DataFrame:
             on_error="ignore",
         ),
     )
-    # A null image raises before the provider call. In Daft 0.7.15 that row can
-    # null out the whole prompt morsel under on_error=ignore, so exclude failed
-    # decodes from the native prompt and merge them back afterwards.
-    invalid_images = df.where(col("vlm_image_bytes").is_null()).with_column(
-        "llm_json", lit(None).cast(daft.DataType.string())
-    )
-    df = valid_images.union_all_by_name(invalid_images)
     # Validate in Python rather than Daft try_deserialize: the latter can raise
     # on syntactically valid JSON whose field types do not match the struct.
     df = df.with_column("llm_analysis", validate_llm_responses(col("llm_json")))

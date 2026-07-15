@@ -218,8 +218,38 @@ def test_native_provider_keeps_udf_on_error_out_of_openai_request():
 def test_llm_validator_rejects_malformed_response_envelopes():
     from multimodal_toolkit.image.vlm import validate_llm_response
 
-    for raw in (None, "", "[]", "{}", '{"has_face": "true"}'):
+    for raw in (
+        None,
+        "",
+        "[]",
+        "{}",
+        '{"has_face": "true"}',
+        json.dumps(
+            {
+                "has_face": False,
+                "is_blurry": False,
+                "is_face_blurry": False,
+                "is_avatar": False,
+                "clarity_confidence": 1.0,
+                "avatar_confidence": 0.0,
+                "reason": "no face",
+                "unexpected": True,
+            }
+        ),
+    ):
         assert validate_llm_response(raw)["has_face"] is None
+
+
+def test_native_prompter_skips_null_images_without_api_call():
+    import asyncio
+
+    from multimodal_toolkit.image.vlm import get_image_vlm_provider
+
+    descriptor = get_image_vlm_provider().get_prompter(
+        "test-vision-model", use_chat_completions=True, on_error="ignore"
+    )
+    prompter = descriptor.instantiate()
+    assert asyncio.run(prompter.prompt(("instruction", None))) is None
 
 
 def test_local_and_llm_batches_append_to_one_unified_table(tmp_path):

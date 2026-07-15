@@ -32,6 +32,7 @@ _NULL_ANALYSIS = {
     "avatar_confidence": None,
     "reason": None,
 }
+_EXPECTED_FIELDS = set(_NULL_ANALYSIS)
 
 
 def _valid_confidence(value) -> bool:
@@ -47,6 +48,8 @@ def validate_llm_response(raw: str | None) -> dict:
     try:
         payload = json.loads(raw) if raw is not None else None
         if not isinstance(payload, dict):
+            return dict(_NULL_ANALYSIS)
+        if set(payload) != _EXPECTED_FIELDS:
             return dict(_NULL_ANALYSIS)
         bool_fields = ("has_face", "is_blurry", "is_face_blurry", "is_avatar")
         if any(type(payload.get(name)) is not bool for name in bool_fields):
@@ -93,7 +96,7 @@ class _OnErrorSafePrompterDescriptor(OpenAIPrompterDescriptor):
         prompt_options = dict(self.prompt_options)
         for name in UDFOptions.__dataclass_fields__:
             prompt_options.pop(name, None)
-        return OpenAIPrompter(
+        return _NullSafeOpenAIPrompter(
             provider_name=self.provider_name,
             provider_options=self.provider_options,
             model=self.model_name,
@@ -101,6 +104,15 @@ class _OnErrorSafePrompterDescriptor(OpenAIPrompterDescriptor):
             return_format=self.return_format,
             prompt_options=prompt_options,
         )
+
+
+class _NullSafeOpenAIPrompter(OpenAIPrompter):
+    async def prompt(self, messages):
+        # Missing/download-failed/undecodable images must not enter Daft's
+        # MIME dispatcher: in 0.7.15 one None can fail the entire prompt morsel.
+        if any(message is None for message in messages):
+            return None
+        return await super().prompt(messages)
 
 
 class ImageVLMProvider(OpenAIProvider):
