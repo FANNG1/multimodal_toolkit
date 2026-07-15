@@ -9,11 +9,14 @@ import pyarrow.parquet as pq
 import pytest
 
 from multimodal_toolkit.storage.io import (
+    analysis_num_partitions,
+    coalesce_for_write,
     daft_io_config,
     lance_storage_options,
     lance_write_mode,
     read_analysis_output,
     read_manifest,
+    spread_partitions,
 )
 
 ROWS = {"doc_id": ["a.jpg", "b.jpg"], "s3_url": ["s3://bkt/a.jpg", "s3://bkt/b.jpg"]}
@@ -86,6 +89,76 @@ def test_lance_write_mode_reraises_non_missing_value_error(monkeypatch):
     monkeypatch.setattr(lance, "dataset", _raise_value_error)
     with pytest.raises(ValueError, match="credential refresh failed"):
         storage_io.lance_write_mode("s3://bucket/table.lance")
+
+
+def test_daft_io_config_applies_s3_tuning():
+    from multimodal_toolkit import config
+
+    s3 = daft_io_config().s3
+    assert s3.max_connections == config.S3_MAX_CONNECTIONS
+    assert s3.num_tries == config.S3_NUM_TRIES
+    assert s3.retry_initial_backoff_ms == config.S3_RETRY_INITIAL_BACKOFF_MS
+    assert s3.connect_timeout_ms == config.S3_CONNECT_TIMEOUT_MS
+    assert s3.read_timeout_ms == config.S3_READ_TIMEOUT_MS
+    assert s3.retry_mode == config.S3_RETRY_MODE
+
+
+class _FakePartitionedDf:
+    def __init__(self):
+        self.partitions = None
+
+    def into_partitions(self, n):
+        self.partitions = n
+        return self
+
+
+def test_spread_partitions_explicit_setting(monkeypatch):
+    from multimodal_toolkit import config
+
+    monkeypatch.setattr(config, "ANALYZE_NUM_PARTITIONS", 7)
+    df = _FakePartitionedDf()
+    assert spread_partitions(df) is df
+    assert df.partitions == 7
+
+
+def test_spread_partitions_native_default_is_noop(monkeypatch):
+    from multimodal_toolkit import config
+
+    monkeypatch.setattr(config, "ANALYZE_NUM_PARTITIONS", None)
+    monkeypatch.setattr(config, "USE_RAY", False)
+    df = _FakePartitionedDf()
+    assert spread_partitions(df) is df
+    assert df.partitions is None
+
+
+def test_analysis_num_partitions_derives_from_ray_cpus(monkeypatch):
+    import sys
+    import types
+
+    from multimodal_toolkit import config
+
+    fake_ray = types.SimpleNamespace(
+        is_initialized=lambda: True,
+        cluster_resources=lambda: {"CPU": 5.0},
+    )
+    monkeypatch.setitem(sys.modules, "ray", fake_ray)
+    monkeypatch.setattr(config, "ANALYZE_NUM_PARTITIONS", None)
+    monkeypatch.setattr(config, "USE_RAY", True)
+    assert analysis_num_partitions() == 10
+
+
+def test_coalesce_for_write_merges_large_partition_counts(monkeypatch):
+    from multimodal_toolkit import config
+
+    monkeypatch.setattr(config, "ANALYZE_NUM_PARTITIONS", 64)
+    df = _FakePartitionedDf()
+    assert coalesce_for_write(df) is df
+    assert df.partitions == 8
+
+    monkeypatch.setattr(config, "ANALYZE_NUM_PARTITIONS", 4)
+    small = _FakePartitionedDf()
+    assert coalesce_for_write(small) is small
+    assert small.partitions is None
 
 
 def test_read_analysis_output_lance_suffix_uses_lance_reader(monkeypatch, tmp_path):

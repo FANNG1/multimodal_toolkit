@@ -22,7 +22,14 @@ from daft import col
 from daft.functions import download, when
 
 from .. import config
-from ...storage.io import configure_daft_runner, daft_io_config, read_manifest
+from ...storage.io import (
+    coalesce_for_write,
+    configure_daft_runner,
+    daft_io_config,
+    read_manifest,
+    spread_partitions,
+)
+from ... import config as shared_config
 from ..rules import add_rule_columns
 from ..udfs import ImageQualityUDF
 
@@ -56,7 +63,7 @@ _SCORE_FIELDS = [
 ]
 
 
-@daft.cls(cpus=1)
+@daft.cls(cpus=1, max_retries=2)
 class _ImageEmbedUDF:
     def __init__(self) -> None:
         from multimodal_toolkit.image.embedding import get_embedder
@@ -87,7 +94,9 @@ def run(manifest: str, out_path: str, embed: bool = False) -> None:
 
     # manifest 只有 doc_id + s3_url 两列；按 s3_url 下载图片字节，
     # 失败的行 image_bytes 为 null（on_error="null"），保留不丢。
+    # 下载前先切分区：manifest 文件太小，不切的话 Ray 上整条链路只有一个 task。
     df = read_manifest(manifest)
+    df = spread_partitions(df)
     df = df.with_column(
         "image_bytes", download(col("s3_url"), on_error="null", io_config=io_config)
     )
@@ -119,10 +128,16 @@ def run(manifest: str, out_path: str, embed: bool = False) -> None:
         embed_udf = _ImageEmbedUDF()
         df = df.with_column("image_embedding", embed_udf(col("image_bytes"), col("status")))
         output = df.select(*_OUTPUT_COLS, "image_embedding")
-        output.write_lance(out_path, mode="overwrite", io_config=io_config)
+        output.write_lance(
+            out_path,
+            mode="overwrite",
+            io_config=io_config,
+            max_rows_per_file=shared_config.LANCE_MAX_ROWS_PER_FILE,
+            max_bytes_per_file=shared_config.LANCE_MAX_BYTES_PER_FILE,
+        )
         print(f"[ok] wrote image analysis+embedding lance staging table: {out_path}")
     else:
-        output = df.select(*_OUTPUT_COLS)
+        output = coalesce_for_write(df.select(*_OUTPUT_COLS))
         output.write_json(out_path, write_mode="overwrite", io_config=io_config)
         print(f"[ok] wrote image analysis JSONL: {out_path}")
 

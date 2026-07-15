@@ -12,6 +12,9 @@ ASR_DEVICE = os.getenv("ASR_DEVICE", "cpu")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+# llm_prompt 的 async 并发协程数（每个并行 task 内）。总并发 =
+# 该值 × 并行 task 数，需按 API 供应商限流预算调整。
+DEEPSEEK_CONCURRENCY = _shared_config.env_int("DEEPSEEK_CONCURRENCY", 8)
 
 MIN_DURATION_S = float(os.getenv("MIN_DURATION_S", "0"))
 MAX_DURATION_S = float(os.getenv("MAX_DURATION_S", "1800"))

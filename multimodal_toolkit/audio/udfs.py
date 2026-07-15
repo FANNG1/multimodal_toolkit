@@ -46,7 +46,7 @@ def prompt_udf(transcripts, acoustic_emotions):
     ]
 
 
-@daft.cls(cpus=1)
+@daft.cls(cpus=1, max_retries=2)
 class AsrUDF:
     def __init__(self) -> None:
         from multimodal_toolkit.audio.asr import SenseVoiceASR

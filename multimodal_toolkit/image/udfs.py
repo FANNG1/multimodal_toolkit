@@ -49,7 +49,7 @@ _NULL_ROW = {
 }
 
 
-@daft.cls(cpus=1)
+@daft.cls(cpus=1, max_retries=2)
 class ImageQualityUDF:
     def __init__(self) -> None:
         # 每个 worker 进程只加载一次模型，而不是每行加载——模型初始化

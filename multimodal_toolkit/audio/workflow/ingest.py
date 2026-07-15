@@ -13,6 +13,7 @@ import daft
 from daft import col, lit
 from daft.functions import download
 
+from ... import config
 from ...storage.blob import validate_blob_v2
 from ...storage.io import configure_daft_runner, daft_io_config, lance_write_mode, read_analysis_output
 
@@ -35,7 +36,14 @@ def run(analysis_path: str, lance_uri: str) -> None:
     )
 
     mode = lance_write_mode(lance_uri)
-    df.write_lance(lance_uri, mode=mode, io_config=io_config, blob_columns=["audio_blob"])
+    df.write_lance(
+        lance_uri,
+        mode=mode,
+        io_config=io_config,
+        blob_columns=["audio_blob"],
+        max_rows_per_file=config.LANCE_MAX_ROWS_PER_FILE,
+        max_bytes_per_file=config.LANCE_MAX_BYTES_PER_FILE,
+    )
     validate_blob_v2(lance_uri, "audio_blob")
 
     result = daft.read_lance(lance_uri, io_config=io_config)

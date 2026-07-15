@@ -12,6 +12,7 @@ import daft
 from daft import col, lit
 from daft.functions import download, when
 
+from ... import config
 from ...storage.blob import validate_blob_v2
 from ...storage.io import (
     configure_daft_runner,
@@ -107,7 +108,14 @@ def run(analysis_path: str, lance_uri: str) -> None:
         lit(now).cast(daft.DataType.timestamp("us", "UTC")),
     )
 
-    df.write_lance(lance_uri, mode=mode, io_config=io_config, blob_columns=["image_blob"])
+    df.write_lance(
+        lance_uri,
+        mode=mode,
+        io_config=io_config,
+        blob_columns=["image_blob"],
+        max_rows_per_file=config.LANCE_MAX_ROWS_PER_FILE,
+        max_bytes_per_file=config.LANCE_MAX_BYTES_PER_FILE,
+    )
     # 校验 image_blob 确实以 lance blob v2 编码落盘（而不是被静默降级成
     # 普通 large_binary），库版本升级时这是最容易出问题的地方。
     validate_blob_v2(lance_uri, "image_blob")

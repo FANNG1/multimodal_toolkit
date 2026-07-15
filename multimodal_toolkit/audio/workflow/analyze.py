@@ -29,7 +29,14 @@ from ..udfs import (
     duration_udf,
     prompt_udf,
 )
-from ...storage.io import configure_daft_runner, daft_io_config, read_manifest
+from ...storage.io import (
+    coalesce_for_write,
+    configure_daft_runner,
+    daft_io_config,
+    read_manifest,
+    spread_partitions,
+)
+from ... import config as shared_config
 
 # PII patterns (Chinese mainland): 18-digit resident ID and 11-digit mobile
 # number. Redacted from transcripts before they are sent to the LLM or stored.
@@ -53,7 +60,7 @@ _BASE_OUTPUT_COLS = [
 ]
 
 
-@daft.cls(cpus=1)
+@daft.cls(cpus=1, max_retries=2)
 class _EmbedUDF:
     """Turns raw audio into a fixed-length float vector (the "embedding").
 
@@ -80,7 +87,9 @@ class _EmbedUDF:
 
 def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
     """Download audio from S3 and run the full analysis pipeline."""
+    # 下载前先切分区：manifest 文件太小，不切的话 Ray 上整条链路只有一个 task。
     df = read_manifest(manifest)
+    df = spread_partitions(df)
     df = df.with_column(
         "audio_bytes", download(col("s3_url"), on_error="null", io_config=io_config)
     )
@@ -131,6 +140,8 @@ def _build_analysis_df(manifest: str, io_config) -> daft.DataFrame:
                 use_chat_completions=True,
                 response_format={"type": "json_object"},
                 temperature=0,
+                concurrency=config.DEEPSEEK_CONCURRENCY,
+                on_error="ignore",
             ),
         )
     else:
@@ -163,10 +174,16 @@ def run(manifest: str, out_path: str, embed: bool = False) -> None:
         embed_udf = _EmbedUDF()
         df = df.with_column("audio_embedding", embed_udf(col("audio_bytes")))
         output = df.select(*_BASE_OUTPUT_COLS, "audio_embedding")
-        output.write_lance(out_path, mode="overwrite", io_config=io_config)
+        output.write_lance(
+            out_path,
+            mode="overwrite",
+            io_config=io_config,
+            max_rows_per_file=shared_config.LANCE_MAX_ROWS_PER_FILE,
+            max_bytes_per_file=shared_config.LANCE_MAX_BYTES_PER_FILE,
+        )
         print(f"[ok] wrote analysis+embedding lance staging table: {out_path}")
     else:
-        output = df.select(*_BASE_OUTPUT_COLS)
+        output = coalesce_for_write(df.select(*_BASE_OUTPUT_COLS))
         output.write_json(out_path, write_mode="overwrite", io_config=io_config)
         print(f"[ok] wrote analysis JSONL: {out_path}")
 

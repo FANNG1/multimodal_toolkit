@@ -105,6 +105,40 @@ USE_RAY=0               # set to 1 to use Ray for Daft-backed steps
 RAY_ADDRESS=            # leave empty to start/join local Ray
 ```
 
+### Tuning for large Ray runs
+
+All knobs below are applied through `configure_daft_runner()` / `daft_io_config()`
+at workflow startup (Daft itself only reads a handful of `DAFT_*` env vars natively).
+
+```sh
+# Parallelism: analyze stages split the manifest into this many partitions
+# before download. Unset/auto = 2 × cluster CPUs on Ray, no split on native.
+ANALYZE_NUM_PARTITIONS=auto
+
+# Memory safety: rows per morsel. Keep small — rows carry image/audio bytes.
+DAFT_DEFAULT_MORSEL_SIZE=32
+
+# LLM concurrency: async requests per parallel task. Total in-flight requests
+# = DEEPSEEK_CONCURRENCY × parallel tasks; budget against provider rate limits.
+DEEPSEEK_CONCURRENCY=8
+
+# S3/MinIO: connections per IO thread, retries, timeouts (now actually applied).
+S3_MAX_CONNECTIONS=8
+S3_NUM_TRIES=5
+S3_READ_TIMEOUT_MS=60000
+
+# Actor startup: raise if many UDF actors cold-start and download models at once.
+DAFT_ACTOR_UDF_READY_TIMEOUT=600
+
+# Long jobs: enable Daft's event log for post-mortem debugging (read natively by Daft).
+DAFT_EVENT_LOG_ENABLED=1
+DAFT_EVENT_LOG_DIR=/tmp/daft-events
+```
+
+Output layout: JSONL writes coalesce partitions (≈ `ANALYZE_NUM_PARTITIONS / 8` files)
+and Lance writes honor `LANCE_MAX_ROWS_PER_FILE` / `LANCE_MAX_BYTES_PER_FILE`, so high
+analysis parallelism does not produce a flood of tiny output files or fragments.
+
 ## Usage — audio workflow pipeline
 
 The manifest must be parquet, jsonl, or csv with at minimum `doc_id` and `s3_url` columns.  
