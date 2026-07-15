@@ -5,7 +5,7 @@ Laplacian 方差清晰度）→ rules.add_rule_columns 产生布尔结论。
 
 带 --use-llm 时切换为视觉大模型后端：图片解码并缩到固定长边后，通过
 OpenAI-compatible Chat Completions 判断整图是否模糊、是否为真人单人头像。
-该模式不会加载本地人脸检测模型，且必须写入单独的 Lance 资产表。
+该模式不会加载本地人脸检测模型；两种后端输出相同的顶层字段。
 
 manifest 里的每个条目都对应输出中的一行——下载失败、解码失败的图片
 不会被丢弃，而是通过 status 列标记（ok / download_failed / decode_failed），
@@ -22,21 +22,13 @@ import argparse
 import daft
 from daft import col, lit
 from daft.functions import download, when
+from daft.functions.ai import prompt as llm_prompt
 
 from .. import config
 from ...storage.io import configure_daft_runner, daft_io_config, read_manifest
 from ..rules import add_rule_columns
 from ..udfs import ImageQualityUDF, prepare_image_for_vlm
-
-LLM_ANALYSIS_DTYPE = daft.DataType.struct(
-    {
-        "is_blurry": daft.DataType.bool(),
-        "is_avatar": daft.DataType.bool(),
-        "clarity_confidence": daft.DataType.float64(),
-        "avatar_confidence": daft.DataType.float64(),
-        "reason": daft.DataType.string(),
-    }
-)
+from ..vlm import get_image_vlm_provider, validate_llm_responses
 
 # Stage 1 落盘的全部列：标识列（doc_id/s3_url）+ 处理状态 + 原始分数 +
 # 布尔结论。分数和结论都保留，后续调阈值只需重算结论，不用重跑模型。
@@ -54,10 +46,8 @@ _OUTPUT_COLS = [
     "has_face",
     "is_blurry",
     "is_face_blurry",
-]
-
-_LLM_OUTPUT_COLS = [
     "is_avatar",
+    "analysis_backend",
     "clarity_confidence",
     "avatar_confidence",
     "llm_reason",
@@ -73,18 +63,6 @@ _SCORE_FIELDS = [
     "blur_score",
     "face_blur_score",
 ]
-
-
-@daft.cls(cpus=1)
-class _ImageVLMUDF:
-    def __init__(self) -> None:
-        from multimodal_toolkit.image.vlm import ImageVLMClient
-
-        self._client = ImageVLMClient()
-
-    @daft.method.batch(return_dtype=daft.DataType.string())
-    def __call__(self, image_bytes_col):
-        return [self._client.analyze(image_bytes) for image_bytes in image_bytes_col.to_pylist()]
 
 
 @daft.cls(cpus=1)
@@ -132,7 +110,12 @@ def _add_local_analysis(df: daft.DataFrame) -> daft.DataFrame:
         .when(col("blur_score").is_null(), "decode_failed")
         .otherwise("ok"),
     )
-    return add_rule_columns(df)
+    df = add_rule_columns(df)
+    df = df.with_column("analysis_backend", lit("local"))
+    df = df.with_column("clarity_confidence", lit(None).cast(daft.DataType.float64()))
+    df = df.with_column("avatar_confidence", lit(None).cast(daft.DataType.float64()))
+    df = df.with_column("llm_reason", lit(None).cast(daft.DataType.string()))
+    return df
 
 
 def _add_llm_analysis(df: daft.DataFrame) -> daft.DataFrame:
@@ -142,23 +125,36 @@ def _add_llm_analysis(df: daft.DataFrame) -> daft.DataFrame:
     df = df.with_column("height", col("vlm_prep")["height"])
     df = df.with_column("vlm_image_bytes", col("vlm_prep")["vlm_image_bytes"])
 
-    vlm_udf = _ImageVLMUDF()
-    df = df.with_column("llm_json", vlm_udf(col("vlm_image_bytes")))
-    df = df.with_column("llm_analysis", col("llm_json").try_deserialize("json", LLM_ANALYSIS_DTYPE))
+    from multimodal_toolkit.image.prompt import build_image_analysis_prompt
+
+    valid_images = df.where(~col("vlm_image_bytes").is_null()).with_column(
+        "llm_json",
+        llm_prompt(
+            [lit(build_image_analysis_prompt()), col("vlm_image_bytes")],
+            provider=get_image_vlm_provider(),
+            model=config.IMAGE_VLM_MODEL,
+            use_chat_completions=True,
+            response_format={"type": "json_object"},
+            temperature=0,
+            max_tokens=256,
+            concurrency=config.IMAGE_VLM_CONCURRENCY,
+            on_error="ignore",
+        ),
+    )
+    # A null image raises before the provider call. In Daft 0.7.15 that row can
+    # null out the whole prompt morsel under on_error=ignore, so exclude failed
+    # decodes from the native prompt and merge them back afterwards.
+    invalid_images = df.where(col("vlm_image_bytes").is_null()).with_column(
+        "llm_json", lit(None).cast(daft.DataType.string())
+    )
+    df = valid_images.union_all_by_name(invalid_images)
+    # Validate in Python rather than Daft try_deserialize: the latter can raise
+    # on syntactically valid JSON whose field types do not match the struct.
+    df = df.with_column("llm_analysis", validate_llm_responses(col("llm_json")))
 
     clarity_confidence = col("llm_analysis")["clarity_confidence"]
     avatar_confidence = col("llm_analysis")["avatar_confidence"]
-    valid = (
-        ~col("llm_analysis")["is_blurry"].is_null()
-        & ~col("llm_analysis")["is_avatar"].is_null()
-        & ~clarity_confidence.is_null()
-        & (clarity_confidence >= 0.0)
-        & (clarity_confidence <= 1.0)
-        & ~avatar_confidence.is_null()
-        & (avatar_confidence >= 0.0)
-        & (avatar_confidence <= 1.0)
-        & ~col("llm_analysis")["reason"].is_null()
-    )
+    valid = ~col("llm_analysis")["has_face"].is_null()
     df = df.with_column(
         "status",
         when(col("image_bytes").is_null(), "download_failed")
@@ -167,8 +163,13 @@ def _add_llm_analysis(df: daft.DataFrame) -> daft.DataFrame:
         .otherwise("ok"),
     )
     ok = col("status") == "ok"
+    df = df.with_column("has_face", when(ok, col("llm_analysis")["has_face"]))
     df = df.with_column("is_blurry", when(ok, col("llm_analysis")["is_blurry"]))
+    df = df.with_column(
+        "is_face_blurry", when(ok, col("llm_analysis")["is_face_blurry"])
+    )
     df = df.with_column("is_avatar", when(ok, col("llm_analysis")["is_avatar"]))
+    df = df.with_column("analysis_backend", lit("llm"))
     df = df.with_column("clarity_confidence", when(ok, clarity_confidence))
     df = df.with_column("avatar_confidence", when(ok, avatar_confidence))
     df = df.with_column("llm_reason", when(ok, col("llm_analysis")["reason"]))
@@ -181,8 +182,6 @@ def _add_llm_analysis(df: daft.DataFrame) -> daft.DataFrame:
         "face_area_ratio": daft.DataType.float64(),
         "blur_score": daft.DataType.float64(),
         "face_blur_score": daft.DataType.float64(),
-        "has_face": daft.DataType.bool(),
-        "is_face_blurry": daft.DataType.bool(),
     }
     for name, dtype in null_types.items():
         df = df.with_column(name, lit(None).cast(dtype))
@@ -213,16 +212,14 @@ def run(manifest: str, out_path: str, embed: bool = False, use_llm: bool = False
     # --embed is enabled, either by sharing decoded arrays or by fusing UDFs.
     df = _add_llm_analysis(df) if use_llm else _add_local_analysis(df)
 
-    output_cols = [*_OUTPUT_COLS, *(_LLM_OUTPUT_COLS if use_llm else [])]
-
     if embed:
         embed_udf = _ImageEmbedUDF()
         df = df.with_column("image_embedding", embed_udf(col("image_bytes")))
-        output = df.select(*output_cols, "image_embedding")
+        output = df.select(*_OUTPUT_COLS, "image_embedding")
         output.write_lance(out_path, mode="overwrite", io_config=io_config)
         print(f"[ok] wrote image analysis+embedding lance staging table: {out_path}")
     else:
-        output = df.select(*output_cols)
+        output = df.select(*_OUTPUT_COLS)
         output.write_json(out_path, write_mode="overwrite", io_config=io_config)
         print(f"[ok] wrote image analysis JSONL: {out_path}")
 

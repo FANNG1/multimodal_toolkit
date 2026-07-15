@@ -84,10 +84,14 @@ def test_analyze_statuses(pipeline):
 
 def test_analyze_verdicts(pipeline):
     rows = pipeline["analysis"]
+    assert rows["face_sharp.jpg"]["analysis_backend"] == "local"
     assert rows["face_sharp.jpg"]["has_face"] is True
     assert rows["face_sharp.jpg"]["is_blurry"] is False
+    assert rows["face_sharp.jpg"]["is_avatar"] is True
     assert rows["face_blurred.jpg"]["is_face_blurry"] is True
+    assert rows["face_blurred.jpg"]["is_avatar"] is False
     assert rows["no_face.jpg"]["has_face"] is False
+    assert rows["no_face.jpg"]["is_avatar"] is False
     assert rows["face_sharp.jpg"]["blur_score"] > rows["face_blurred.jpg"]["blur_score"]
 
 
@@ -97,6 +101,7 @@ def test_analyze_failed_rows_have_null_verdicts(pipeline):
         assert rows[doc]["has_face"] is None
         assert rows[doc]["is_blurry"] is None
         assert rows[doc]["is_face_blurry"] is None
+        assert rows[doc]["is_avatar"] is None
         assert rows[doc]["blur_score"] is None
 
 

@@ -41,16 +41,10 @@ _ANALYSIS_COLUMN_DTYPES = {
     "is_blurry": daft.DataType.bool(),
     "is_face_blurry": daft.DataType.bool(),
     "is_avatar": daft.DataType.bool(),
+    "analysis_backend": daft.DataType.string(),
     "clarity_confidence": daft.DataType.float64(),
     "avatar_confidence": daft.DataType.float64(),
     "llm_reason": daft.DataType.string(),
-}
-
-_LLM_COLUMNS = {
-    "is_avatar",
-    "clarity_confidence",
-    "avatar_confidence",
-    "llm_reason",
 }
 
 
@@ -82,34 +76,6 @@ def _validate_embedding_schema(lance_uri: str, mode: str, analysis_has_embedding
     )
 
 
-def _validate_analysis_backend_schema(
-    lance_uri: str, mode: str, analysis_columns: set[str]
-) -> None:
-    """Prevent local and VLM analysis batches from sharing one asset table."""
-    incoming_llm_columns = _LLM_COLUMNS & analysis_columns
-    if incoming_llm_columns and incoming_llm_columns != _LLM_COLUMNS:
-        missing = ", ".join(sorted(_LLM_COLUMNS - incoming_llm_columns))
-        raise ValueError(f"Incomplete image LLM analysis schema; missing: {missing}")
-    if mode != "append":
-        return
-
-    import lance
-
-    ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
-    table_columns = set(ds.schema.names)
-    table_is_llm = _LLM_COLUMNS <= table_columns
-    incoming_is_llm = _LLM_COLUMNS <= analysis_columns
-    if table_is_llm == incoming_is_llm:
-        return
-
-    existing = "LLM" if table_is_llm else "local"
-    incoming = "LLM" if incoming_is_llm else "local"
-    raise ValueError(
-        f"Cannot append {incoming} image analysis to an existing {existing} analysis table. "
-        "Use a new Lance table; local and --use-llm results intentionally have different schemas."
-    )
-
-
 def run(analysis_path: str, lance_uri: str) -> None:
     configure_daft_runner()
     io_config = daft_io_config()
@@ -122,7 +88,6 @@ def run(analysis_path: str, lance_uri: str) -> None:
     analysis_has_embedding = "image_embedding" in analysis_columns
     mode = lance_write_mode(lance_uri)
     _validate_embedding_schema(lance_uri, mode, analysis_has_embedding)
-    _validate_analysis_backend_schema(lance_uri, mode, analysis_columns)
 
     # 重新按 s3_url 下载图片字节作为 blob 列。Stage 1 的 JSONL 里不带
     # 原始字节（JSON 存不了大二进制），所以这里是第二次下载。

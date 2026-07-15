@@ -23,8 +23,9 @@ IMAGE_ASSET_SCHEMA = pa.schema(
         pa.field("has_face", pa.bool_()),
         pa.field("is_blurry", pa.bool_()),
         pa.field("is_face_blurry", pa.bool_()),
-        # Present only in tables created from Stage 1 --use-llm output.
+        # Unified local/LLM verdict schema; confidences/reason are null locally.
         pa.field("is_avatar", pa.bool_()),
+        pa.field("analysis_backend", pa.utf8()),
         pa.field("clarity_confidence", pa.float64()),
         pa.field("avatar_confidence", pa.float64()),
         pa.field("llm_reason", pa.utf8()),

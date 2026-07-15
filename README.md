@@ -223,14 +223,16 @@ The default detections are local (no VLM/API):
 
 | Detection | Method | Output columns |
 |-----------|--------|----------------|
-| Face presence | InsightFace SCRFD (`buffalo_l`, detection module only, CPU) | `face_count`, `face_score`, `face_area_ratio`, `has_face` |
+| Face presence / avatar | InsightFace SCRFD (`buffalo_l`, detection module only, CPU) + threshold rules | `face_count`, `face_score`, `face_area_ratio`, `has_face`, `is_avatar` |
 | Clarity / blur | OpenCV Laplacian variance on the image resized to `IMAGE_LONG_EDGE` (whole image + largest-face crop) | `blur_score`, `face_blur_score`, `is_blurry`, `is_face_blurry` |
 | Text/image similarity | ChineseCLIP (`OFA-Sys/chinese-clip-vit-base-patch16`) | `image_embedding` |
 
 Stage 1 also has an optional `--use-llm` backend. It replaces the local face/blur
-analysis with an OpenAI-compatible vision model that returns whole-image blur and
-real-person avatar verdicts plus confidence and a short reason. LLM output must be
-ingested into a separate Lance table from local-analysis output.
+analysis with Daft's native OpenAI-compatible multimodal `prompt`. Both backends
+write the same verdict columns (`has_face`, `is_blurry`, `is_face_blurry`,
+`is_avatar`) and identify their source in `analysis_backend`. LLM-only confidence
+and reason fields are null for local analysis; local-only raw scores are null for
+LLM analysis, so both modes can append to one unified table.
 
 All face-derived metrics (`face_score`, `face_area_ratio`, `face_blur_score`) come from
 the same face — the largest one — so the rule engine's AND conditions always judge a
@@ -243,7 +245,7 @@ the detector's own coarse filter `FACE_DET_THRESH` (default 0.3) — faces below
 reach the table.
 
 Every manifest entry produces exactly one output row. Failed items are kept with a
-`status` column (`ok` / `download_failed` / `decode_failed`), null scores, and null
+`status` column (`ok` / `download_failed` / `decode_failed` / `llm_failed`), null scores, and null
 verdicts — "unknown" stays distinguishable from "judged no", and unreadable images are
 themselves a reportable compliance signal.
 
@@ -259,6 +261,7 @@ FACE_DET_SCORE_MIN=0.5        # min det score (of the largest face) for has_face
 MIN_FACE_RATIO=0.01           # min face-area / image-area for has_face
 BLUR_THRESHOLD=100.0          # blur_score below this → is_blurry
 FACE_BLUR_THRESHOLD=80.0      # face_blur_score below this → is_face_blurry
+AVATAR_MIN_FACE_RATIO=0.03    # local is_avatar requires one clear face at least this large
 IMAGE_EMBED_MODEL=OFA-Sys/chinese-clip-vit-base-patch16
 IMAGE_EMBED_DEVICE=cpu
 IMAGE_EMBED_DIM=512
@@ -269,6 +272,7 @@ IMAGE_VLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 IMAGE_VLM_MODEL=qwen-vl-plus
 IMAGE_VLM_TIMEOUT_S=60
 IMAGE_VLM_MAX_RETRIES=2
+IMAGE_VLM_CONCURRENCY=1       # increase only when the provider quota permits
 ```
 
 The first detection run downloads the SCRFD model pack (~280 MB) to `~/.insightface`; set
@@ -286,7 +290,7 @@ python -m multimodal_toolkit.image.workflow.analyze \
   --out      s3://contacts/image_poc/analysis.jsonl
 
 # Stage 1 with an OpenAI-compatible vision model. The image is sent to the
-# configured external service. Use a new output and asset table for this mode.
+# configured external service. Its output uses the same asset-table schema.
 python -m multimodal_toolkit.image.workflow.analyze \
   --manifest s3://contacts/image_poc/manifest.parquet \
   --out      s3://contacts/image_poc/llm-analysis.jsonl \
@@ -304,10 +308,10 @@ python -m multimodal_toolkit.image.workflow.ingest \
   --lance-uri s3://contacts/image_poc/assets.lance
 
 # If Stage 1 was run without --embed, pass analysis.jsonl instead.
-# For --use-llm output, use a new Lance URI rather than an existing local-analysis table:
+# Local and --use-llm batches may append to the same unified Lance table:
 # python -m multimodal_toolkit.image.workflow.ingest \
 #   --analysis s3://contacts/image_poc/llm-analysis.jsonl \
-#   --lance-uri s3://contacts/image_poc/llm-assets.lance
+#   --lance-uri s3://contacts/image_poc/assets.lance
 
 # Stage 3 — index for text/image similarity search
 python -m multimodal_toolkit.workflow.index \
@@ -386,12 +390,15 @@ Stage 1 downloads audio bytes for ASR and embedding; Stage 2 downloads the same 
 If Stage 1 was run without `--embed`, the Lance asset table has no `audio_embedding` column. Stage 3 will error and Stage 4 `--vector-from` will have nothing to search. Re-run Stage 1 with `--embed` and re-ingest to add embeddings.
 For image tables, keep all batches for the same Lance table consistent: either all Stage 1 runs use `--embed`, or none do. The image ingest step rejects appending `image_embedding` batches to a table created without that column, and vice versa.
 
-**Local and LLM image analysis use separate tables.**
-`--use-llm` adds `is_avatar`, `clarity_confidence`, `avatar_confidence`, and
-`llm_reason`, and writes the model's whole-image verdict into `is_blurry`.
-Local-only detector scores and face verdicts are null in that mode. Image ingest
-rejects mixing these results with a local-analysis table. A failed VLM call keeps
-the manifest row with `status = 'llm_failed'` and null LLM verdicts.
+**Local and LLM image analysis share a unified verdict schema.**
+Both modes write `has_face`, `is_blurry`, `is_face_blurry`, and `is_avatar`, with
+`analysis_backend = 'local'` or `'llm'`. Local `is_avatar` is a deterministic
+single-clear-face rule; LLM `is_avatar` additionally applies semantic composition
+judgement. Local-only detector scores are null for LLM rows, while LLM confidence
+and reason fields are null for local rows. A failed VLM call keeps the manifest row
+with `status = 'llm_failed'` and null verdicts. Daft 0.7.15 leaks its UDF `on_error`
+option into OpenAI request kwargs, so the workflow uses a small descriptor adapter
+that removes only the leaked request argument while retaining Daft's native prompt.
 
 **IVF_PQ minimum row count.**  
 The default `--num-partitions 16` requires at least 4096 rows. For tables with fewer rows, pass `--num-partitions 1` (or skip `--embedding` and rely on scalar queries only).

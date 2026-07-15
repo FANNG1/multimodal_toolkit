@@ -37,12 +37,11 @@ def _manifest(tmp_path, rows: list[tuple[str, str]]) -> str:
 
 
 def _fake_prompt(monkeypatch, payload: str) -> None:
-    class FakeVLMUDF:
-        def __call__(self, image_bytes):
-            return daft.lit(payload)
+    def fake_prompt(messages, **kwargs):
+        return daft.lit(payload)
 
     monkeypatch.setattr(
-        "multimodal_toolkit.image.workflow.analyze._ImageVLMUDF", FakeVLMUDF
+        "multimodal_toolkit.image.workflow.analyze.llm_prompt", fake_prompt
     )
 
 
@@ -53,13 +52,16 @@ def _vlm_config(monkeypatch):
     monkeypatch.setattr(config, "IMAGE_VLM_MODEL", "test-vision-model")
     monkeypatch.setattr(config, "IMAGE_VLM_TIMEOUT_S", 1.0)
     monkeypatch.setattr(config, "IMAGE_VLM_MAX_RETRIES", 0)
+    monkeypatch.setattr(config, "IMAGE_VLM_CONCURRENCY", 1)
 
 
 def test_prompt_defines_avatar_and_clarity_contract():
     prompt = build_image_analysis_prompt()
     assert "真人单人" in prompt
     assert "整张图片" in prompt
+    assert "has_face" in prompt
     assert "is_blurry" in prompt
+    assert "is_face_blurry" in prompt
     assert "is_avatar" in prompt
     assert "clarity_confidence" in prompt
     assert "avatar_confidence" in prompt
@@ -98,7 +100,9 @@ def test_llm_analyze_writes_typed_results_and_preserves_failed_rows(monkeypatch,
         monkeypatch,
         json.dumps(
             {
+                "has_face": True,
                 "is_blurry": False,
+                "is_face_blurry": False,
                 "is_avatar": True,
                 "clarity_confidence": 0.96,
                 "avatar_confidence": 0.91,
@@ -120,14 +124,16 @@ def test_llm_analyze_writes_typed_results_and_preserves_failed_rows(monkeypatch,
 
     avatar = by_id["avatar"]
     assert data["status"][avatar] == "ok"
+    assert data["has_face"][avatar] is True
     assert data["is_blurry"][avatar] is False
+    assert data["is_face_blurry"][avatar] is False
     assert data["is_avatar"][avatar] is True
+    assert data["analysis_backend"][avatar] == "llm"
     assert data["clarity_confidence"][avatar] == pytest.approx(0.96)
     assert data["avatar_confidence"][avatar] == pytest.approx(0.91)
     assert data["llm_reason"][avatar] == "图片清晰，单个真人为主体"
     assert data["face_count"][avatar] is None
     assert data["blur_score"][avatar] is None
-    assert data["has_face"][avatar] is None
 
     for doc_id, expected in (("corrupt", "decode_failed"), ("missing", "download_failed")):
         i = by_id[doc_id]
@@ -141,11 +147,24 @@ def test_llm_analyze_writes_typed_results_and_preserves_failed_rows(monkeypatch,
         "not-json",
         json.dumps(
             {
+                "has_face": True,
                 "is_blurry": False,
+                "is_face_blurry": False,
                 "is_avatar": True,
                 "clarity_confidence": 1.5,
                 "avatar_confidence": 0.9,
                 "reason": "invalid confidence",
+            }
+        ),
+        json.dumps(
+            {
+                "has_face": True,
+                "is_blurry": "false",
+                "is_face_blurry": False,
+                "is_avatar": True,
+                "clarity_confidence": 0.9,
+                "avatar_confidence": 0.9,
+                "reason": "wrong boolean type",
             }
         ),
     ],
@@ -176,72 +195,86 @@ def test_llm_mode_requires_configuration(monkeypatch, tmp_path):
         run(str(tmp_path / "missing.parquet"), str(tmp_path / "out.jsonl"), use_llm=True)
 
 
-def test_vlm_client_builds_vision_request_and_handles_errors(monkeypatch):
-    from multimodal_toolkit.image.vlm import ImageVLMClient
+def test_native_provider_keeps_udf_on_error_out_of_openai_request():
+    from multimodal_toolkit.image.vlm import get_image_vlm_provider
 
-    calls = []
-
-    class Message:
-        content = '{"is_blurry": false}'
-
-    class Response:
-        choices = [type("Choice", (), {"message": Message()})()]
-
-    class Completions:
-        def create(self, **kwargs):
-            calls.append(kwargs)
-            return Response()
-
-    class FakeOpenAI:
-        def __init__(self, **kwargs):
-            self.chat = type("Chat", (), {"completions": Completions()})()
-
-    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
-    client = ImageVLMClient()
-    assert client.analyze(b"jpeg") == '{"is_blurry": false}'
-    request = calls[0]
-    assert request["model"] == "test-vision-model"
-    assert request["response_format"] == {"type": "json_object"}
-    assert request["messages"][0]["content"][1]["image_url"]["url"].startswith(
-        "data:image/jpeg;base64,"
+    descriptor = get_image_vlm_provider().get_prompter(
+        "test-vision-model",
+        use_chat_completions=True,
+        concurrency=1,
+        on_error="ignore",
+        response_format={"type": "json_object"},
+        temperature=0,
     )
+    assert descriptor.get_udf_options().on_error == "ignore"
+    assert descriptor.get_udf_options().concurrency == 1
+    prompter = descriptor.instantiate()
+    assert "on_error" not in prompter.generation_config
+    assert "concurrency" not in prompter.generation_config
+    assert prompter.generation_config["response_format"] == {"type": "json_object"}
+    assert prompter.generation_config["temperature"] == 0
 
-    def fail(**kwargs):
-        raise RuntimeError("API unavailable")
 
-    client._client.chat.completions.create = fail
-    assert client.analyze(b"jpeg") is None
+def test_llm_validator_rejects_malformed_response_envelopes():
+    from multimodal_toolkit.image.vlm import validate_llm_response
+
+    for raw in (None, "", "[]", "{}", '{"has_face": "true"}'):
+        assert validate_llm_response(raw)["has_face"] is None
 
 
-def test_ingest_rejects_mixing_local_and_llm_tables(tmp_path):
+def test_local_and_llm_batches_append_to_one_unified_table(tmp_path):
     import lance
 
-    from multimodal_toolkit.image.workflow.ingest import _validate_analysis_backend_schema
+    from multimodal_toolkit.image.workflow.ingest import run as ingest_run
 
-    local_uri = str(tmp_path / "local.lance")
-    lance.write_dataset(pa.table({"doc_id": ["old"]}), local_uri)
-    llm_columns = {
-        "doc_id",
-        "is_avatar",
-        "clarity_confidence",
-        "avatar_confidence",
-        "llm_reason",
+    image = tmp_path / "image.jpg"
+    image.write_bytes(b"\xff\xd8fake-jpeg-bytes")
+    common = {
+        "s3_url": str(image),
+        "status": "ok",
+        "width": 100,
+        "height": 100,
+        "face_count": 1,
+        "face_score": 0.9,
+        "face_area_ratio": 0.2,
+        "blur_score": 200.0,
+        "face_blur_score": 150.0,
+        "has_face": True,
+        "is_blurry": False,
+        "is_face_blurry": False,
+        "is_avatar": True,
     }
-    with pytest.raises(ValueError, match="Use a new Lance table"):
-        _validate_analysis_backend_schema(local_uri, "append", llm_columns)
+    local = {
+        **common,
+        "doc_id": "local",
+        "analysis_backend": "local",
+        "clarity_confidence": None,
+        "avatar_confidence": None,
+        "llm_reason": None,
+    }
+    llm = {
+        **common,
+        "doc_id": "llm",
+        "face_count": None,
+        "face_score": None,
+        "face_area_ratio": None,
+        "blur_score": None,
+        "face_blur_score": None,
+        "analysis_backend": "llm",
+        "clarity_confidence": 0.95,
+        "avatar_confidence": 0.9,
+        "llm_reason": "清晰的单人头像",
+    }
+    local_path = tmp_path / "local.jsonl"
+    llm_path = tmp_path / "llm.jsonl"
+    local_path.write_text(json.dumps(local) + "\n")
+    llm_path.write_text(json.dumps(llm) + "\n")
 
-    llm_uri = str(tmp_path / "llm.lance")
-    lance.write_dataset(
-        pa.table(
-            {
-                "doc_id": ["old"],
-                "is_avatar": [True],
-                "clarity_confidence": [0.9],
-                "avatar_confidence": [0.9],
-                "llm_reason": ["ok"],
-            }
-        ),
-        llm_uri,
-    )
-    with pytest.raises(ValueError, match="Use a new Lance table"):
-        _validate_analysis_backend_schema(llm_uri, "append", {"doc_id"})
+    assets = str(tmp_path / "assets.lance")
+    ingest_run(str(local_path), assets)
+    ingest_run(str(llm_path), assets)
+    rows = lance.dataset(assets).to_table(
+        columns=["doc_id", "analysis_backend", "is_avatar", "llm_reason"]
+    ).to_pylist()
+    assert {row["analysis_backend"] for row in rows} == {"local", "llm"}
+    assert {row["doc_id"] for row in rows} == {"local", "llm"}

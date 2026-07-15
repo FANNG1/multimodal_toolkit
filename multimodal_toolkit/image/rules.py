@@ -9,6 +9,8 @@
   is_blurry       —— 整图清晰度低于 BLUR_THRESHOLD。
   is_face_blurry  —— 图里有脸，但人脸区域的清晰度低于 FACE_BLUR_THRESHOLD
                      （背景清晰但脸糊的图能通过 is_blurry，却会在这里被抓住）。
+  is_avatar       —— 恰好一张合格人脸，面积达到头像最低占比，且整图和脸部
+                     都不模糊。它是本地规则近似，不包含姿态、背景等语义判断。
 
 输入必须带 status 列（见 image/workflow/analyze.py）：只有 status = "ok" 的行
 才产生结论；下载/解码失败的行结论为 null——"不知道"必须和"判定为否"
@@ -47,6 +49,19 @@ def add_rule_columns(df: daft.DataFrame) -> daft.DataFrame:
         when(
             ok,
             (col("has_face") & (col("face_blur_score") < config.FACE_BLUR_THRESHOLD)).fill_null(False),
+        ),
+    )
+    df = df.with_column(
+        "is_avatar",
+        when(
+            ok,
+            (
+                (col("face_count") == 1)
+                & col("has_face")
+                & (col("face_area_ratio") >= config.AVATAR_MIN_FACE_RATIO)
+                & ~col("is_blurry")
+                & ~col("is_face_blurry")
+            ).fill_null(False),
         ),
     )
     return df
