@@ -4,6 +4,9 @@ Audio call-centre analysis POC: ingest recordings from S3, store audio as Lance 
 
 Also includes an image analysis workflow (face presence + clarity detection), fully isolated from the audio pipeline — see [Image workflow](#image-workflow) below.
 
+For repeatable Daft audio performance and memory testing—from a local MinIO/Ray
+smoke test to a 4-worker cluster—see the [audio benchmark guide](docs/audio-benchmark.md).
+
 ## Architecture overview
 
 Media-specific analysis lives under each media package (`audio/workflow/` and
