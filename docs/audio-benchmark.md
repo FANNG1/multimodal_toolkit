@@ -94,6 +94,8 @@ uv run python -m benchmark.audio local-baseline
 - 单轮最多 45 分钟；
 - 输出两轮吞吐均值、首尾差异和变异系数；CV ≤ 10% 判为重复性通过。
 
+标准 Baseline 定义为 40–60 条、每条 60 秒且单轮时限不超过 45 分钟；默认取 50 条。CLI 仍允许缩小 `--count`/`--duration-s` 来快速验证编排，但会标记为 non-standard diagnostic baseline，不应与标准结果横向比较。任一轮失败或超时也会写出 `baseline-summary.{json,md}`，并将重复性 SLO 标为失败。
+
 运行目录结构：
 
 ```text

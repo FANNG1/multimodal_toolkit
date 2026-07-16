@@ -8,7 +8,9 @@ from pathlib import Path
 from .config import BenchmarkConfig, DEFAULT_RUN_ROOT, new_run_id
 
 
-def _add_run_arguments(parser: argparse.ArgumentParser, *, ray_default: str = "local") -> None:
+def _add_run_arguments(
+    parser: argparse.ArgumentParser, *, ray_default: str = "local"
+) -> None:
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--lance-uri", required=True)
@@ -71,7 +73,9 @@ def _cmd_generate(args) -> None:
         source_dir=Path(args.source_dir) if args.source_dir else None,
         seed=args.seed,
     )
-    print(json.dumps({"run_id": run_id, **asdict(result)}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps({"run_id": run_id, **asdict(result)}, ensure_ascii=False, indent=2)
+    )
 
 
 def _cmd_run(args) -> None:
@@ -87,7 +91,11 @@ def _cmd_run(args) -> None:
         raise
     else:
         report = build_report(cfg.output_dir)
-        print(json.dumps({"summary": summary, "report": report}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"summary": summary, "report": report}, ensure_ascii=False, indent=2
+            )
+        )
 
 
 def _cmd_submit(args) -> None:
@@ -154,7 +162,9 @@ def _cmd_local_smoke(args) -> None:
             raise
         report = build_report(cfg.output_dir)
         if summary.get("rows") != dataset.rows:
-            raise RuntimeError(f"row count mismatch: manifest={dataset.rows}, lance={summary.get('rows')}")
+            raise RuntimeError(
+                f"row count mismatch: manifest={dataset.rows}, lance={summary.get('rows')}"
+            )
         if summary.get("unique_doc_ids") != dataset.rows:
             raise RuntimeError("output doc_id values are not unique")
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -178,6 +188,16 @@ def _cmd_local_baseline(args) -> None:
 
     if args.repeats < 2:
         raise ValueError("--repeats must be at least 2")
+    standard_baseline = (
+        40 <= args.count <= 60
+        and args.duration_s == 60.0
+        and 0 < args.max_minutes <= 45.0
+    )
+    if not standard_baseline:
+        print(
+            "[warning] non-standard diagnostic baseline: the comparable baseline uses "
+            "40-60 files, 60s duration, and a per-repeat limit no greater than 45 minutes"
+        )
     base_run_id = args.run_id or f"baseline-{new_run_id()}"
     base_dir = DEFAULT_RUN_ROOT / base_run_id
     print(f"[preflight] checking configured MinIO bucket {args.bucket}")
@@ -211,6 +231,7 @@ def _cmd_local_baseline(args) -> None:
     server, thread = start_in_thread(port=0, profile=args.mock_profile)
     port = server.server_address[1]
     reports = []
+    repeat_error: Exception | None = None
     try:
         if warmup_dataset is not None:
             warmup_cfg = BenchmarkConfig(
@@ -234,7 +255,9 @@ def _cmd_local_baseline(args) -> None:
             print(f"[warmup] {warmup_dataset.manifest_uri} -> {warmup_cfg.lance_uri}")
             warmup_summary = run_pipeline(warmup_cfg)
             build_report(warmup_cfg.output_dir)
-            if warmup_summary.get("rows") != 1 or warmup_summary.get("status_counts") != {"ok": 1}:
+            if warmup_summary.get("rows") != 1 or warmup_summary.get(
+                "status_counts"
+            ) != {"ok": 1}:
                 raise RuntimeError(f"warm-up validation failed: {warmup_summary}")
         for repeat in range(1, args.repeats + 1):
             repeat_name = f"repeat-{repeat:02d}"
@@ -259,20 +282,36 @@ def _cmd_local_baseline(args) -> None:
                 num_partitions=args.num_partitions,
                 run_dir=str(base_dir / repeat_name),
             )
-            print(f"[run {repeat}/{args.repeats}] {dataset.manifest_uri} -> {lance_uri}")
+            print(
+                f"[run {repeat}/{args.repeats}] {dataset.manifest_uri} -> {lance_uri}"
+            )
             try:
                 summary = run_pipeline(cfg)
-            except Exception:
+            except Exception as exc:
                 if (cfg.output_dir / "summary.json").exists():
-                    build_report(cfg.output_dir)
-                raise
+                    reports.append(build_report(cfg.output_dir))
+                else:
+                    reports.append(
+                        {
+                            "run_id": repeat_run_id,
+                            "state": "failed",
+                            "summary": {"elapsed_s": 0.0, "error": repr(exc)},
+                        }
+                    )
+                repeat_error = exc
+                break
             report = build_report(cfg.output_dir)
-            if summary.get("rows") != dataset.rows or summary.get("unique_doc_ids") != dataset.rows:
-                raise RuntimeError(
+            if (
+                summary.get("rows") != dataset.rows
+                or summary.get("unique_doc_ids") != dataset.rows
+            ):
+                repeat_error = RuntimeError(
                     f"repeat {repeat} row validation failed: expected={dataset.rows}, "
                     f"rows={summary.get('rows')}, unique={summary.get('unique_doc_ids')}"
                 )
             reports.append(report)
+            if repeat_error is not None:
+                break
         comparison = build_baseline_report(
             base_dir,
             reports,
@@ -283,10 +322,25 @@ def _cmd_local_baseline(args) -> None:
                 "duration_s": args.duration_s,
                 "total_bytes": dataset.total_bytes,
                 "total_audio_seconds": dataset.total_audio_seconds,
+                "planned_repeats": args.repeats,
+                "seed": args.seed,
+                "source_dir": args.source_dir,
+                "mock_profile": args.mock_profile,
+                "warmup_enabled": not args.skip_warmup,
+                "standard_baseline": standard_baseline,
+                "max_minutes_per_repeat": args.max_minutes,
+                "asr_actor_cpus": args.asr_actor_cpus,
+                "asr_actor_concurrency": args.asr_actor_concurrency,
+                "asr_batch_size": args.asr_batch_size,
+                "llm_concurrency": args.llm_concurrency,
+                "sample_interval_s": args.sample_interval_s,
+                "num_partitions": args.num_partitions,
             },
         )
         print(json.dumps(comparison, ensure_ascii=False, indent=2))
-        print(f"[ok] comparison: {base_dir / 'baseline-summary.md'}")
+        print(f"[summary] comparison: {base_dir / 'baseline-summary.md'}")
+        if repeat_error is not None:
+            raise repeat_error
     finally:
         server.shutdown()
         server.server_close()
@@ -309,7 +363,9 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--run-id", default=None)
     generate.add_argument("--bucket", default="benchmark")
     generate.add_argument("--prefix", default="audio")
-    generate.add_argument("--profile", choices=("smoke", "fixed", "mixed"), default="smoke")
+    generate.add_argument(
+        "--profile", choices=("smoke", "fixed", "mixed"), default="smoke"
+    )
     generate.add_argument("--count", type=int, default=4)
     generate.add_argument("--duration-s", type=float, default=30.0)
     generate.add_argument("--source-dir", default=None)
@@ -336,7 +392,9 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--run-dir", required=True)
     report.set_defaults(func=_cmd_report)
 
-    smoke = commands.add_parser("local-smoke", help="run a real local end-to-end smoke test")
+    smoke = commands.add_parser(
+        "local-smoke", help="run a real local end-to-end smoke test"
+    )
     smoke.add_argument("--run-id", default=None)
     smoke.add_argument("--bucket", default="benchmark")
     smoke.add_argument("--prefix", default="audio")
@@ -358,7 +416,9 @@ def build_parser() -> argparse.ArgumentParser:
     baseline.add_argument("--repeats", type=int, default=2)
     baseline.add_argument("--source-dir", default=None)
     baseline.add_argument("--seed", type=int, default=20260715)
-    baseline.add_argument("--mock-profile", choices=("fast", "standard"), default="fast")
+    baseline.add_argument(
+        "--mock-profile", choices=("fast", "standard"), default="fast"
+    )
     baseline.add_argument(
         "--skip-warmup",
         action="store_true",
