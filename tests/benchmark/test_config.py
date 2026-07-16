@@ -32,3 +32,13 @@ def test_cli_parses_run_controls():
     assert args.max_minutes == 60
     assert args.asr_batch_size == 2
     assert args.num_partitions == 64
+
+
+def test_local_baseline_defaults_to_two_fixed_sixty_second_runs():
+    args = build_parser().parse_args(["local-baseline"])
+    assert args.count == 50
+    assert args.duration_s == 60
+    assert args.repeats == 2
+    assert args.mock_profile == "fast"
+    assert args.max_minutes == 45
+    assert args.skip_warmup is False

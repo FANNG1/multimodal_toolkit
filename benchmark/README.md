@@ -22,6 +22,16 @@ models are cached or downloadable, and `data/audio/` contains seed audio.
 uv run python -m benchmark.audio local-smoke --count 4
 ```
 
+For a repeatable local performance baseline, generate 50 fixed 60-second files,
+warm up the model/cache once, and run the same manifest twice:
+
+```bash
+uv run python -m benchmark.audio local-baseline
+```
+
+The comparison is written to
+`.benchmarks/<run-id>/baseline-summary.{json,md}`.
+
 Results are written to `.benchmarks/<run-id>/`, including `metadata.json`,
 `summary.json`, `resources.csv`, `report.json`, `report.md`, the Daft physical
 plan, and Daft event logs.
