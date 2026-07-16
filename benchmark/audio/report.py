@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import statistics
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
@@ -113,6 +114,54 @@ def build_report(run_dir: Path) -> dict:
     write_json(run_dir / "report.json", report)
     _write_markdown(run_dir / "report.md", report)
     return report
+
+
+def build_baseline_report(run_dir: Path, reports: list[dict], dataset: dict) -> dict:
+    """Compare repeated runs over the same fixed-duration manifest."""
+    if len(reports) < 2:
+        raise ValueError("baseline comparison requires at least two reports")
+    audio_rates = [report["throughput"]["audio_seconds_per_wall_second"] for report in reports]
+    file_rates = [report["throughput"]["files_per_s"] for report in reports]
+    elapsed = [report["summary"]["elapsed_s"] for report in reports]
+    mean_audio_rate = statistics.fmean(audio_rates)
+    comparison = {
+        "run_id": dataset["run_id"],
+        "dataset": dataset,
+        "repeats": len(reports),
+        "all_succeeded": all(report["state"] == "success" for report in reports),
+        "elapsed_s": elapsed,
+        "audio_seconds_per_wall_second": audio_rates,
+        "files_per_s": file_rates,
+        "mean_audio_seconds_per_wall_second": mean_audio_rate,
+        "throughput_cv": statistics.pstdev(audio_rates) / mean_audio_rate if mean_audio_rate else None,
+        "repeat_delta_percent": (
+            (audio_rates[-1] - audio_rates[0]) / audio_rates[0] * 100 if audio_rates[0] else None
+        ),
+        "passes_repeatability_slo": bool(
+            mean_audio_rate and statistics.pstdev(audio_rates) / mean_audio_rate <= 0.10
+        ),
+        "reports": [report["run_id"] for report in reports],
+    }
+    write_json(run_dir / "baseline-summary.json", comparison)
+    lines = [
+        f"# Local baseline {dataset['run_id']}",
+        "",
+        f"- Dataset: {dataset['rows']} files × {dataset['duration_s']:.0f}s target duration",
+        f"- Repeats: {len(reports)}",
+        f"- Mean audio seconds / wall second: {mean_audio_rate:.4f}",
+        f"- Throughput CV: {comparison['throughput_cv'] * 100:.2f}%",
+        f"- First-to-last delta: {comparison['repeat_delta_percent']:.2f}%",
+        f"- Repeatability SLO (CV ≤ 10%): `{'PASS' if comparison['passes_repeatability_slo'] else 'FAIL'}`",
+        "",
+        "| Repeat | Elapsed (s) | Audio sec / wall sec | Files/s |",
+        "|---:|---:|---:|---:|",
+    ]
+    for index, (elapsed_s, audio_rate, file_rate) in enumerate(
+        zip(elapsed, audio_rates, file_rates), start=1
+    ):
+        lines.append(f"| {index} | {elapsed_s:.2f} | {audio_rate:.4f} | {file_rate:.4f} |")
+    (run_dir / "baseline-summary.md").write_text("\n".join(lines) + "\n")
+    return comparison
 
 
 def _write_markdown(path: Path, report: dict) -> None:
