@@ -24,6 +24,7 @@ uv run python -m benchmark.audio --help
 | `submit` | 通过 Ray Jobs API 提交同一个 pipeline |
 | `report` | 从已有运行产物重建报告 |
 | `local-smoke` | 一键完成 MinIO 预检、造数、本地 Ray 执行和校验 |
+| `local-baseline` | 构造固定时长数据并重复运行，比较吞吐稳定性 |
 
 每次运行在 `.benchmarks/<run_id>/` 或 `--run-dir` 指定目录生成：
 
@@ -74,6 +75,51 @@ uv run python -m benchmark.audio local-smoke \
   --source-dir /path/to/audio \
   --count 8
 ```
+
+### 本地性能 Baseline
+
+`local-smoke` 只有少量文件，仅用于验证功能。要得到有意义的本地吞吐和内存曲线，使用：
+
+```bash
+uv run python -m benchmark.audio local-baseline
+```
+
+默认行为：
+
+- 生成 50 条固定 60 秒音频；
+- 先用一条音频预热 Ray、模型和本地缓存，warm-up 不计入两轮比较；
+- 两轮复用完全相同的 manifest；
+- 每轮写入独立的 Lance 表，避免覆盖；
+- 使用 fast Mock LLM，减少外部延迟随机性；
+- 单轮最多 45 分钟；
+- 输出两轮吞吐均值、首尾差异和变异系数；CV ≤ 10% 判为重复性通过。
+
+标准 Baseline 定义为 40–60 条、每条 60 秒且单轮时限不超过 45 分钟；默认取 50 条。CLI 仍允许缩小 `--count`/`--duration-s` 来快速验证编排，但会标记为 non-standard diagnostic baseline，不应与标准结果横向比较。任一轮失败或超时也会写出 `baseline-summary.{json,md}`，并将重复性 SLO 标为失败。
+
+运行目录结构：
+
+```text
+.benchmarks/<baseline-run-id>/
+├── repeat-01/
+├── repeat-02/
+├── warmup/
+├── baseline-summary.json
+└── baseline-summary.md
+```
+
+常用调整：
+
+```bash
+uv run python -m benchmark.audio local-baseline \
+  --count 60 \
+  --duration-s 60 \
+  --repeats 2 \
+  --max-minutes 45
+```
+
+如果当前 Ray/模型缓存已经由其他任务预热，可传 `--skip-warmup`。常规可重复测试不建议跳过，否则首次下载/解压模型会显著抬高第一轮耗时并造成虚假的高 CV。
+
+默认数据量约 50 音频分钟。根据此前本地约 2 audio seconds / wall second 的结果，单轮预计 20–30 分钟；实际时间仍取决于 CPU、actor 初始化和种子编码。两轮运行共享同一个 local Ray 进程，但每轮重新建立 Daft query/ASR actor，因此报告仍包含每轮 actor 初始化成本，不包含首次模型下载成本。
 
 ## 3. 构造测试数据
 

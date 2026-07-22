@@ -1,32 +1,39 @@
-# Daft audio stability benchmark
+# Daft 音频稳定性基准测试
 
-For complete local and multi-node Ray instructions, sizing guidance, metrics,
-and extension points, see the [audio benchmark guide](../docs/audio-benchmark.md).
+完整的本地与多节点 Ray 操作说明、容量规划、指标口径和扩展点，见
+[音频基准测试指南](../docs/audio-benchmark.md)。
 
-This package exercises the real audio path without calling a real LLM:
+本 package 在不调用真实 LLM 的前提下跑通完整的音频链路：
 
 ```
-MinIO -> Daft/Ray download -> SenseVoice ASR -> HTTP mock LLM -> Lance blob v2
+MinIO -> Daft/Ray 下载 -> SenseVoice ASR -> HTTP mock LLM -> Lance blob v2
 ```
 
-It always uses the MinIO credentials and endpoint from the repository `.env`.
-It never starts, stops, or deletes the configured MinIO service. Each run writes
-under its own `s3://<bucket>/<prefix>/<run-id>/` prefix.
+它始终使用仓库 `.env` 中的 MinIO 凭据与 endpoint，绝不会启动、停止或删除已配置的
+MinIO 服务。每次运行写入各自独立的 `s3://<bucket>/<prefix>/<run-id>/` 前缀下。
 
-## Local smoke test
+## 本地冒烟测试
 
-Prerequisites: the configured MinIO is running, the SenseVoice and FSMN VAD
-models are cached or downloadable, and `data/audio/` contains seed audio.
+前置条件：配置的 MinIO 已在运行，SenseVoice 与 FSMN VAD 模型已缓存或可下载，
+且 `data/audio/` 中有种子音频。
 
 ```bash
 uv run python -m benchmark.audio local-smoke --count 4
 ```
 
-Results are written to `.benchmarks/<run-id>/`, including `metadata.json`,
-`summary.json`, `resources.csv`, `report.json`, `report.md`, the Daft physical
-plan, and Daft event logs.
+如果需要可重复的本地性能 baseline —— 生成 50 条固定 60 秒音频，预热一次模型/缓存，
+再用同一份 manifest 跑两轮：
 
-## Separate commands
+```bash
+uv run python -m benchmark.audio local-baseline
+```
+
+比较结果写入 `.benchmarks/<run-id>/baseline-summary.{json,md}`。
+
+运行产物写入 `.benchmarks/<run-id>/`，包含 `metadata.json`、`summary.json`、
+`resources.csv`、`report.json`、`report.md`、Daft 物理执行计划以及 Daft 事件日志。
+
+## 分步命令
 
 ```bash
 uv run python -m benchmark.audio generate --profile smoke --count 4
@@ -47,6 +54,5 @@ uv run python -m benchmark.audio submit \
   --ray-address auto --max-minutes 60 --wait
 ```
 
-Use `generate --profile fixed` for controlled fixed-duration data and
-`--profile mixed` for a 70% short / 25% medium / 5% long distribution. Data
-generation happens before the timed benchmark.
+`generate --profile fixed` 用于生成受控的固定时长数据，`--profile mixed` 生成
+70% 短 / 25% 中 / 5% 长 的分布。数据生成发生在计时的基准测试之前。
