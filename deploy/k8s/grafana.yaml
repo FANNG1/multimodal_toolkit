@@ -32,6 +32,37 @@ data:
           path: /var/lib/grafana/dashboards
   daft-ray.json: |
     {"annotations":{"list":[]},"editable":true,"panels":[{"type":"stat","title":"Ray 平均 CPU 使用率 (%)","gridPos":{"h":5,"w":4,"x":0,"y":0},"targets":[{"expr":"avg(ray_node_cpu_utilization)","refId":"A"}]},{"type":"stat","title":"Ray 运行中 Job","gridPos":{"h":5,"w":4,"x":4,"y":0},"targets":[{"expr":"sum(ray_running_jobs)","refId":"A"}]},{"type":"stat","title":"Ray 已完成 Job","gridPos":{"h":5,"w":4,"x":8,"y":0},"targets":[{"expr":"sum(ray_finished_jobs_total)","refId":"A"}]},{"type":"stat","title":"Daft 最新作业耗时 (s)","gridPos":{"h":5,"w":4,"x":12,"y":0},"targets":[{"expr":"daft_audio_run_elapsed_seconds","refId":"A"}]},{"type":"stat","title":"Daft 音频实时倍率","gridPos":{"h":5,"w":4,"x":16,"y":0},"targets":[{"expr":"daft_audio_run_audio_seconds_per_wall_second","refId":"A"}]},{"type":"stat","title":"Daft 输入吞吐 (MB/s)","gridPos":{"h":5,"w":4,"x":20,"y":0},"targets":[{"expr":"daft_audio_run_input_megabytes_per_second","refId":"A"}]},{"type":"timeseries","title":"Ray 节点内存使用率 (%)","gridPos":{"h":8,"w":12,"x":0,"y":5},"targets":[{"expr":"100 * ray_node_mem_used / ray_node_mem_total","refId":"A"}]},{"type":"timeseries","title":"Ray Object Store 已用内存","gridPos":{"h":8,"w":12,"x":12,"y":5},"targets":[{"expr":"sum(ray_object_store_used_memory)","refId":"A"},{"expr":"sum(ray_object_store_available_memory)","refId":"B"}]},{"type":"timeseries","title":"Daft ASR/LLM P50/P95 延迟 (ms)","gridPos":{"h":8,"w":12,"x":0,"y":13},"targets":[{"expr":"daft_audio_asr_latency_p50_milliseconds","refId":"A"},{"expr":"daft_audio_asr_latency_p95_milliseconds","refId":"B"},{"expr":"daft_audio_llm_latency_p50_milliseconds","refId":"C"},{"expr":"daft_audio_llm_latency_p95_milliseconds","refId":"D"}]},{"type":"timeseries","title":"Daft 状态行数","gridPos":{"h":8,"w":12,"x":12,"y":13},"targets":[{"expr":"daft_audio_run_status_rows","refId":"A"}]},{"type":"timeseries","title":"Daft Ray 进程 RSS 峰值","gridPos":{"h":8,"w":12,"x":0,"y":21},"targets":[{"expr":"daft_audio_ray_process_rss_peak_bytes","refId":"A"}]},{"type":"timeseries","title":"Daft Object Store 峰值","gridPos":{"h":8,"w":12,"x":12,"y":21},"targets":[{"expr":"daft_audio_object_store_used_peak_bytes","refId":"A"}]}],"schemaVersion":41,"title":"Daft 与 Ray 本地运行概览","uid":"daft-ray-local","version":2}
+  ray-runtime.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "panels": [
+        {"type":"stat","title":"活跃 Ray 节点","gridPos":{"h":5,"w":4,"x":0,"y":0},"targets":[{"expr":"sum(ray_cluster_active_nodes)","refId":"A"}]},
+        {"type":"stat","title":"运行中 Job","gridPos":{"h":5,"w":4,"x":4,"y":0},"targets":[{"expr":"sum(ray_running_jobs)","refId":"A"}]},
+        {"type":"stat","title":"Actor 总数","gridPos":{"h":5,"w":4,"x":8,"y":0},"targets":[{"expr":"sum(ray_actors)","refId":"A"}]},
+        {"type":"stat","title":"不可调度任务","gridPos":{"h":5,"w":4,"x":12,"y":0},"targets":[{"expr":"sum(ray_scheduler_unscheduleable_tasks)","refId":"A"}]},
+        {"type":"stat","title":"对象 Store 本地对象","gridPos":{"h":5,"w":4,"x":16,"y":0},"targets":[{"expr":"sum(ray_object_store_num_local_objects)","refId":"A"}]},
+        {"type":"stat","title":"Worker 启动失败增量","gridPos":{"h":5,"w":4,"x":20,"y":0},"targets":[{"expr":"sum(increase(ray_scheduler_failed_worker_startup_total[$__rate_interval]))","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 节点 CPU 使用率 (%)","gridPos":{"h":8,"w":12,"x":0,"y":5},"targets":[{"expr":"ray_node_cpu_utilization","legendFormat":"{{ip}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 节点内存使用率 (%)","gridPos":{"h":8,"w":12,"x":12,"y":5},"targets":[{"expr":"100 * ray_node_mem_used / ray_node_mem_total","legendFormat":"{{ip}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程 CPU 使用率 (%)","gridPos":{"h":9,"w":12,"x":0,"y":13},"targets":[{"expr":"ray_component_cpu_percentage","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程 RSS 内存 (MB)","gridPos":{"h":9,"w":12,"x":12,"y":13},"targets":[{"expr":"ray_component_rss_mb","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程 USS 内存 (MB)","gridPos":{"h":9,"w":12,"x":0,"y":22},"targets":[{"expr":"ray_component_uss_mb","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程共享内存 (Bytes)","gridPos":{"h":9,"w":12,"x":12,"y":22},"targets":[{"expr":"ray_component_mem_shared_bytes","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程文件句柄数","gridPos":{"h":8,"w":12,"x":0,"y":31},"targets":[{"expr":"ray_component_num_fds","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Object Store 内存 (Bytes)","gridPos":{"h":8,"w":12,"x":12,"y":31},"targets":[{"expr":"sum(ray_object_store_used_memory)","legendFormat":"used","refId":"A"},{"expr":"sum(ray_object_store_available_memory)","legendFormat":"available","refId":"B"},{"expr":"sum(ray_object_store_fallback_memory)","legendFormat":"fallback","refId":"C"}]},
+        {"type":"timeseries","title":"Ray 网络吞吐 (Bytes/s)","gridPos":{"h":8,"w":12,"x":0,"y":39},"targets":[{"expr":"ray_node_network_receive_speed","legendFormat":"{{ip}} receive","refId":"A"},{"expr":"ray_node_network_send_speed","legendFormat":"{{ip}} send","refId":"B"}]},
+        {"type":"timeseries","title":"Ray 磁盘使用率 (%)","gridPos":{"h":8,"w":12,"x":12,"y":39},"targets":[{"expr":"ray_node_disk_utilization_percentage","legendFormat":"{{ip}}","refId":"A"}]},
+        {"type":"timeseries","title":"调度任务与资源","gridPos":{"h":8,"w":12,"x":0,"y":47},"targets":[{"expr":"sum(ray_scheduler_tasks)","legendFormat":"scheduled tasks","refId":"A"},{"expr":"sum(ray_scheduler_unscheduleable_tasks)","legendFormat":"unschedulable tasks","refId":"B"},{"expr":"sum(ray_resources)","legendFormat":"resources","refId":"C"}]},
+        {"type":"timeseries","title":"对象传输与拉取请求","gridPos":{"h":8,"w":12,"x":12,"y":47},"targets":[{"expr":"sum(ray_object_manager_num_pull_requests)","legendFormat":"pull requests","refId":"A"},{"expr":"sum(ray_pull_manager_requests)","legendFormat":"pull manager requests","refId":"B"},{"expr":"sum(ray_pull_manager_active_bundles)","legendFormat":"active bundles","refId":"C"}]},
+        {"type":"timeseries","title":"GCS 任务事件","gridPos":{"h":8,"w":12,"x":0,"y":55},"targets":[{"expr":"sum(ray_gcs_task_manager_task_events_reported)","legendFormat":"reported","refId":"A"},{"expr":"sum(ray_gcs_task_manager_task_events_stored)","legendFormat":"stored","refId":"B"},{"expr":"sum(ray_gcs_task_manager_task_events_dropped)","legendFormat":"dropped","refId":"C"}]},
+        {"type":"timeseries","title":"Ray 内部进程与 I/O Event Loop 延迟","gridPos":{"h":8,"w":12,"x":12,"y":55},"targets":[{"expr":"sum(ray_internal_num_processes_started)","legendFormat":"processes started","refId":"A"},{"expr":"ray_io_context_event_loop_lag_ms","legendFormat":"{{ip}} event loop lag ms","refId":"B"}]}
+      ],
+      "schemaVersion": 41,
+      "title": "Ray 运行时与进程诊断",
+      "uid": "ray-runtime-local",
+      "version": 1
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -67,6 +98,9 @@ spec:
             - name: provisioning
               mountPath: /var/lib/grafana/dashboards/daft-ray.json
               subPath: daft-ray.json
+            - name: provisioning
+              mountPath: /var/lib/grafana/dashboards/ray-runtime.json
+              subPath: ray-runtime.json
       volumes:
         - name: provisioning
           configMap: {name: grafana-provisioning}
