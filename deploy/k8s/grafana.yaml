@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-credentials
+  namespace: daft-ray
+type: Opaque
+stringData:
+  GF_SECURITY_ADMIN_USER: admin
+  GF_SECURITY_ADMIN_PASSWORD: admin
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+  namespace: daft-ray
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+  dashboard.yaml: |
+    apiVersion: 1
+    providers:
+      - name: Daft Ray
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+  daft-ray.json: |
+    {"annotations":{"list":[]},"editable":true,"panels":[{"type":"stat","title":"Ray CPU 使用率","targets":[{"expr":"avg(ray_node_cpu_utilization)","refId":"A"}]},{"type":"timeseries","title":"Ray Object Store 内存","targets":[{"expr":"sum(ray_object_store_used_memory)","refId":"A"}]},{"type":"stat","title":"Daft 最近作业耗时","targets":[{"expr":"daft_audio_run_elapsed_seconds","refId":"A"}]},{"type":"timeseries","title":"Daft ASR/LLM P95 延迟 (ms)","targets":[{"expr":"daft_audio_asr_latency_p95_milliseconds","refId":"A"},{"expr":"daft_audio_llm_latency_p95_milliseconds","refId":"B"}]},{"type":"timeseries","title":"Daft 状态行数","targets":[{"expr":"daft_audio_run_status_rows","refId":"A"}]}],"schemaVersion":41,"title":"Daft 与 Ray 本地运行概览","uid":"daft-ray-local","version":1}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: daft-ray
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: grafana}
+  template:
+    metadata:
+      labels: {app: grafana}
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:12.0.2
+          envFrom:
+            - secretRef: {name: grafana-credentials}
+          ports:
+            - containerPort: 3000
+              name: web
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts:
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/datasources/datasource.yaml
+              subPath: datasource.yaml
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/dashboards/dashboard.yaml
+              subPath: dashboard.yaml
+            - name: provisioning
+              mountPath: /var/lib/grafana/dashboards/daft-ray.json
+              subPath: daft-ray.json
+      volumes:
+        - name: provisioning
+          configMap: {name: grafana-provisioning}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: daft-ray
+spec:
+  selector: {app: grafana}
+  ports:
+    - name: web
+      port: 3000
+      targetPort: web

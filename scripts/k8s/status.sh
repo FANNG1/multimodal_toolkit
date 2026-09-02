@@ -13,6 +13,10 @@ Prometheus:
   kubectl --context daft-ray -n daft-ray port-forward service/prometheus 9090:9090
   open http://127.0.0.1:9090/targets
 
+Grafana:
+  kubectl --context daft-ray -n daft-ray port-forward service/grafana 3000:3000
+  open http://127.0.0.1:3000
+
 MinIO Console:
   kubectl --context daft-ray -n daft-ray port-forward service/minio 9001:9001
   open http://127.0.0.1:9001

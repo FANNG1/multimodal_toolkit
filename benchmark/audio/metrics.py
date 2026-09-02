@@ -5,8 +5,49 @@ import os
 import socket
 import threading
 import time
+from urllib.parse import quote
 from pathlib import Path
 from typing import Any
+
+
+def push_run_metrics(url: str | None, summary: dict[str, Any]) -> None:
+    """将单次音频作业的聚合指标推送到 Pushgateway。
+
+    Ray Job driver 在查询完成后会退出，不能作为 Prometheus 的稳定 scrape
+    endpoint；因此仅在配置 endpoint 时以 run_id 分组推送最终结果。推送失败
+    不能影响真实数据写出或基准结论，调用方只记录告警。
+    """
+    if not url:
+        return
+
+    run_id = str(summary["run_id"])
+    state = str(summary["state"])
+    lines = [
+        "# TYPE daft_audio_run_state gauge",
+        f'daft_audio_run_state{{state="{state}"}} 1',
+        "# TYPE daft_audio_run_elapsed_seconds gauge",
+        f"daft_audio_run_elapsed_seconds {float(summary['elapsed_s'])}",
+    ]
+    for key, metric in (
+        ("rows", "daft_audio_run_rows"),
+        ("unique_doc_ids", "daft_audio_run_unique_doc_ids"),
+        ("input_bytes", "daft_audio_run_input_bytes"),
+        ("audio_seconds", "daft_audio_run_audio_seconds"),
+        ("asr_p50_ms", "daft_audio_asr_latency_p50_milliseconds"),
+        ("asr_p95_ms", "daft_audio_asr_latency_p95_milliseconds"),
+        ("llm_p50_ms", "daft_audio_llm_latency_p50_milliseconds"),
+        ("llm_p95_ms", "daft_audio_llm_latency_p95_milliseconds"),
+    ):
+        if summary.get(key) is not None:
+            lines.append(f"{metric} {float(summary[key])}")
+    for status, count in (summary.get("status_counts") or {}).items():
+        lines.append(f'daft_audio_run_status_rows{{status="{status}"}} {int(count)}')
+
+    import httpx
+
+    endpoint = f"{url.rstrip('/')}/metrics/job/daft_audio_smoke/run_id/{quote(run_id, safe='')}"
+    response = httpx.put(endpoint, content="\n".join(lines) + "\n", timeout=10.0)
+    response.raise_for_status()
 
 
 def _node_probe_class():

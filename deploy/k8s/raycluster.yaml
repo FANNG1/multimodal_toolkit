@@ -30,6 +30,8 @@ spec:
                 value: minio,mock-llm,127.0.0.1,localhost
               - name: no_proxy
                 value: minio,mock-llm,127.0.0.1,localhost
+              - name: BENCH_PROMETHEUS_PUSHGATEWAY_URL
+                value: http://pushgateway:9091
             envFrom:
               - secretRef:
                   name: minio-credentials

@@ -16,7 +16,9 @@ helm upgrade --install kuberay-operator kuberay/kuberay-operator \
 
 kubectl --context "$kubectl_context" apply -f "$project_root/deploy/k8s/namespace.yaml"
 kubectl --context "$kubectl_context" apply -f "$project_root/deploy/k8s/minio.yaml"
+kubectl --context "$kubectl_context" apply -f "$project_root/deploy/k8s/pushgateway.yaml"
 kubectl --context "$kubectl_context" apply -f "$project_root/deploy/k8s/prometheus.yaml"
+kubectl --context "$kubectl_context" apply -f "$project_root/deploy/k8s/grafana.yaml"
 kubectl --context "$kubectl_context" apply -f "$project_root/deploy/k8s/mock-llm.yaml"
 
 kubectl --context "$kubectl_context" wait --namespace kuberay-system \
@@ -33,6 +35,8 @@ kubectl wait --context "$kubectl_context" --namespace daft-ray \
 kubectl wait --context "$kubectl_context" --namespace daft-ray \
   --for=condition=ready pod -l ray.io/node-type=worker --timeout=5m
 kubectl rollout status --context "$kubectl_context" --namespace daft-ray deployment/prometheus --timeout=5m
+kubectl rollout status --context "$kubectl_context" --namespace daft-ray deployment/pushgateway --timeout=5m
+kubectl rollout status --context "$kubectl_context" --namespace daft-ray deployment/grafana --timeout=5m
 kubectl rollout status --context "$kubectl_context" --namespace daft-ray deployment/mock-llm --timeout=5m
 
 echo "Environment ready. Run scripts/k8s/run-audio-smoke.sh for the real audio pipeline."
