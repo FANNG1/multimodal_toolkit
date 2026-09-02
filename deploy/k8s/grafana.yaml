@@ -92,6 +92,12 @@ spec:
           image: grafana/grafana:12.0.2
           envFrom:
             - secretRef: {name: grafana-credentials}
+          env:
+            # Grafana 只经本机 port-forward 暴露；匿名用户仅能查看预置看板。
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: Viewer
           ports:
             - containerPort: 3000
               name: web
