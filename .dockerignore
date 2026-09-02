@@ -1,10 +1,18 @@
 .git
+.claude
 .idea
 __pycache__
 *.pyc
 .venv
+.benchmarks
+.pytest_cache
+.ruff_cache
+.coverage
 .env
-data/
+# K8s 音频冒烟镜像只需要仓库自带的少量种子音频；其他本地数据不能进入构建上下文。
+data/*
+!data/audio/
+!data/audio/**
 *.db
 *.sqlite
 *.sqlite3

@@ -1,0 +1,96 @@
+# KubeRay 管理的本地 Ray 集群。
+# 镜像由 scripts/k8s/build-image.sh 构建并载入 Minikube，包含完整音频 pipeline。
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: daft-ray
+  namespace: daft-ray
+spec:
+  rayVersion: "2.55.1"
+  enableInTreeAutoscaling: true
+  autoscalerOptions:
+    upscalingMode: Default
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+      metrics-export-port: "8080"
+      num-cpus: "0"
+    template:
+      spec:
+        containers:
+          - name: ray-head
+            image: multimodal-toolkit:audio-local
+            imagePullPolicy: IfNotPresent
+            env:
+              - name: MINIO_ENDPOINT
+                value: http://minio:9000
+              - name: MINIO_REGION
+                value: us-east-1
+              - name: NO_PROXY
+                value: minio,mock-llm,127.0.0.1,localhost
+              - name: no_proxy
+                value: minio,mock-llm,127.0.0.1,localhost
+            envFrom:
+              - secretRef:
+                  name: minio-credentials
+            resources:
+              requests:
+                cpu: 500m
+                memory: 4Gi
+              limits:
+                cpu: "1"
+                memory: 4Gi
+            ports:
+              - containerPort: 6379
+                name: gcs
+              - containerPort: 8265
+                name: dashboard
+              - containerPort: 8080
+                name: metrics
+  workerGroupSpecs:
+    - groupName: cpu-workers
+      replicas: 1
+      minReplicas: 1
+      maxReplicas: 2
+      rayStartParams:
+        metrics-export-port: "8080"
+      template:
+        spec:
+          containers:
+            - name: ray-worker
+              image: multimodal-toolkit:audio-local
+              imagePullPolicy: IfNotPresent
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: 5Gi
+                limits:
+                  cpu: "2"
+                  memory: 5Gi
+              env:
+                - name: MINIO_ENDPOINT
+                  value: http://minio:9000
+                - name: MINIO_REGION
+                  value: us-east-1
+                - name: NO_PROXY
+                  value: minio,mock-llm,127.0.0.1,localhost
+                - name: no_proxy
+                  value: minio,mock-llm,127.0.0.1,localhost
+                # 同一个 worker 内的 ASR actor 复用模型；Pod 重建后会重新下载，避免依赖共享 RWX 卷。
+                - name: MODELSCOPE_CACHE
+                  value: /models
+                - name: CUDA_VISIBLE_DEVICES
+                  value: ""
+              ports:
+                # 为 Prometheus 的 Pod 服务发现显式声明 Ray metrics endpoint。
+                - containerPort: 8080
+                  name: metrics
+              envFrom:
+                - secretRef:
+                    name: minio-credentials
+              volumeMounts:
+                - name: models
+                  mountPath: /models
+          volumes:
+            - name: models
+              emptyDir: {}
