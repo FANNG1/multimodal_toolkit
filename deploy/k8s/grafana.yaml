@@ -35,6 +35,7 @@ data:
   ray-runtime.json: |
     {
       "annotations": {"list": []},
+      "description": "Ray 集群运行态与进程级资源诊断。通过顶部筛选器缩小到指定节点或 Ray 组件；红色阈值表示需要优先排查的资源或调度异常。",
       "editable": true,
       "panels": [
         {"type":"stat","title":"活跃 Ray 节点","gridPos":{"h":5,"w":4,"x":0,"y":0},"targets":[{"expr":"sum(ray_cluster_active_nodes)","refId":"A"}]},
@@ -43,13 +44,13 @@ data:
         {"type":"stat","title":"不可调度任务","gridPos":{"h":5,"w":4,"x":12,"y":0},"targets":[{"expr":"sum(ray_scheduler_unscheduleable_tasks)","refId":"A"}]},
         {"type":"stat","title":"对象 Store 本地对象","gridPos":{"h":5,"w":4,"x":16,"y":0},"targets":[{"expr":"sum(ray_object_store_num_local_objects)","refId":"A"}]},
         {"type":"stat","title":"Worker 启动失败增量","gridPos":{"h":5,"w":4,"x":20,"y":0},"targets":[{"expr":"sum(increase(ray_scheduler_failed_worker_startup_total[$__rate_interval]))","refId":"A"}]},
-        {"type":"timeseries","title":"Ray 节点 CPU 使用率 (%)","gridPos":{"h":8,"w":12,"x":0,"y":5},"targets":[{"expr":"ray_node_cpu_utilization","legendFormat":"{{ip}}","refId":"A"}]},
-        {"type":"timeseries","title":"Ray 节点内存使用率 (%)","gridPos":{"h":8,"w":12,"x":12,"y":5},"targets":[{"expr":"100 * ray_node_mem_used / ray_node_mem_total","legendFormat":"{{ip}}","refId":"A"}]},
-        {"type":"timeseries","title":"Ray 进程 CPU 使用率 (%)","gridPos":{"h":9,"w":12,"x":0,"y":13},"targets":[{"expr":"ray_component_cpu_percentage","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
-        {"type":"timeseries","title":"Ray 进程 RSS 内存 (MB)","gridPos":{"h":9,"w":12,"x":12,"y":13},"targets":[{"expr":"ray_component_rss_mb","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
-        {"type":"timeseries","title":"Ray 进程 USS 内存 (MB)","gridPos":{"h":9,"w":12,"x":0,"y":22},"targets":[{"expr":"ray_component_uss_mb","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
-        {"type":"timeseries","title":"Ray 进程共享内存 (Bytes)","gridPos":{"h":9,"w":12,"x":12,"y":22},"targets":[{"expr":"ray_component_mem_shared_bytes","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
-        {"type":"timeseries","title":"Ray 进程文件句柄数","gridPos":{"h":8,"w":12,"x":0,"y":31},"targets":[{"expr":"ray_component_num_fds","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 节点 CPU 使用率","gridPos":{"h":8,"w":12,"x":0,"y":5},"fieldConfig":{"defaults":{"unit":"percent","thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"orange","value":70},{"color":"red","value":90}]}},"overrides":[]},"targets":[{"expr":"ray_node_cpu_utilization{ip=~\"$node\"}","legendFormat":"{{ip}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 节点内存使用率","gridPos":{"h":8,"w":12,"x":12,"y":5},"fieldConfig":{"defaults":{"unit":"percent","thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"orange","value":75},{"color":"red","value":90}]}},"overrides":[]},"targets":[{"expr":"100 * ray_node_mem_used{ip=~\"$node\"} / ray_node_mem_total{ip=~\"$node\"}","legendFormat":"{{ip}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程 CPU 使用率","gridPos":{"h":9,"w":12,"x":0,"y":13},"fieldConfig":{"defaults":{"unit":"percent","thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"orange","value":70},{"color":"red","value":90}]}},"overrides":[]},"targets":[{"expr":"ray_component_cpu_percentage{ip=~\"$node\",Component=~\"$component\"}","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程 RSS 内存","gridPos":{"h":9,"w":12,"x":12,"y":13},"fieldConfig":{"defaults":{"unit":"decmbytes"},"overrides":[]},"targets":[{"expr":"ray_component_rss_mb{ip=~\"$node\",Component=~\"$component\"}","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程 USS 内存","gridPos":{"h":9,"w":12,"x":0,"y":22},"fieldConfig":{"defaults":{"unit":"decmbytes"},"overrides":[]},"targets":[{"expr":"ray_component_uss_mb{ip=~\"$node\",Component=~\"$component\"}","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程共享内存","gridPos":{"h":9,"w":12,"x":12,"y":22},"fieldConfig":{"defaults":{"unit":"bytes"},"overrides":[]},"targets":[{"expr":"ray_component_mem_shared_bytes{ip=~\"$node\",Component=~\"$component\"}","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
+        {"type":"timeseries","title":"Ray 进程文件句柄数","gridPos":{"h":8,"w":12,"x":0,"y":31},"fieldConfig":{"defaults":{"unit":"none"},"overrides":[]},"targets":[{"expr":"ray_component_num_fds{ip=~\"$node\",Component=~\"$component\"}","legendFormat":"{{ip}} {{Component}} pid={{pid}}","refId":"A"}]},
         {"type":"timeseries","title":"Object Store 内存 (Bytes)","gridPos":{"h":8,"w":12,"x":12,"y":31},"targets":[{"expr":"sum(ray_object_store_used_memory)","legendFormat":"used","refId":"A"},{"expr":"sum(ray_object_store_available_memory)","legendFormat":"available","refId":"B"},{"expr":"sum(ray_object_store_fallback_memory)","legendFormat":"fallback","refId":"C"}]},
         {"type":"timeseries","title":"Ray 网络吞吐 (Bytes/s)","gridPos":{"h":8,"w":12,"x":0,"y":39},"targets":[{"expr":"ray_node_network_receive_speed","legendFormat":"{{ip}} receive","refId":"A"},{"expr":"ray_node_network_send_speed","legendFormat":"{{ip}} send","refId":"B"}]},
         {"type":"timeseries","title":"Ray 磁盘使用率 (%)","gridPos":{"h":8,"w":12,"x":12,"y":39},"targets":[{"expr":"ray_node_disk_utilization_percentage","legendFormat":"{{ip}}","refId":"A"}]},
@@ -58,7 +59,16 @@ data:
         {"type":"timeseries","title":"GCS 任务事件","gridPos":{"h":8,"w":12,"x":0,"y":55},"targets":[{"expr":"sum(ray_gcs_task_manager_task_events_reported)","legendFormat":"reported","refId":"A"},{"expr":"sum(ray_gcs_task_manager_task_events_stored)","legendFormat":"stored","refId":"B"},{"expr":"sum(ray_gcs_task_manager_task_events_dropped)","legendFormat":"dropped","refId":"C"}]},
         {"type":"timeseries","title":"Ray 内部进程与 I/O Event Loop 延迟","gridPos":{"h":8,"w":12,"x":12,"y":55},"targets":[{"expr":"sum(ray_internal_num_processes_started)","legendFormat":"processes started","refId":"A"},{"expr":"ray_io_context_event_loop_lag_ms","legendFormat":"{{ip}} event loop lag ms","refId":"B"}]}
       ],
+      "refresh": "10s",
       "schemaVersion": 41,
+      "tags": ["Ray", "Kubernetes", "进程诊断"],
+      "templating": {
+        "list": [
+          {"name":"node","label":"Ray 节点","type":"query","datasource":{"uid":"prometheus"},"query":"label_values(ray_node_cpu_utilization, ip)","includeAll":true,"allValue":".*","multi":true,"current":{"text":"All","value":"$__all"}},
+          {"name":"component","label":"Ray 组件","type":"query","datasource":{"uid":"prometheus"},"query":"label_values(ray_component_cpu_percentage, Component)","includeAll":true,"allValue":".*","multi":true,"current":{"text":"All","value":"$__all"}}
+        ]
+      },
+      "time": {"from":"now-1h","to":"now"},
       "title": "Ray 运行时与进程诊断",
       "uid": "ray-runtime-local",
       "version": 1
