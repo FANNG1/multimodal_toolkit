@@ -19,7 +19,7 @@ from multimodal_toolkit.storage.blob import validate_blob_v2
 from multimodal_toolkit.storage.io import daft_io_config, lance_storage_options
 
 from .config import BenchmarkConfig, runtime_metadata, write_json
-from .metrics import ResourceSampler
+from .metrics import ResourceSampler, push_run_metrics
 
 
 ASR_DTYPE = daft.DataType.struct(
@@ -323,5 +323,17 @@ def run_pipeline(cfg: BenchmarkConfig) -> dict[str, Any]:
                     "audio_seconds": sum(x or 0 for x in table.column("duration_s").to_pylist()),
                 }
             )
+            for column, prefix in (("asr_ms", "asr"), ("llm_ms", "llm")):
+                values = sorted(
+                    float(value) for value in ds.to_table(columns=[column]).column(column).to_pylist()
+                    if value is not None
+                )
+                if values:
+                    summary[f"{prefix}_p50_ms"] = values[len(values) // 2]
+                    summary[f"{prefix}_p95_ms"] = values[min(len(values) - 1, int(len(values) * 0.95))]
         write_json(run_dir / "summary.json", summary)
+        try:
+            push_run_metrics(os.getenv("BENCH_PROMETHEUS_PUSHGATEWAY_URL"), summary)
+        except Exception as exc:
+            print(f"[warn] failed to push Prometheus metrics: {type(exc).__name__}: {exc}")
     return summary

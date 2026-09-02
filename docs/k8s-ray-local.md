@@ -42,6 +42,7 @@ kubectl --context daft-ray -n daft-ray port-forward service/prometheus 9090:9090
 
 - Ray Dashboard：<http://127.0.0.1:8265>
 - Prometheus targets：<http://127.0.0.1:9090/targets>
+- Grafana：<http://127.0.0.1:3000>（本地开发账号 `admin` / `admin`）
 
 所有 Ray target 应为 `UP`。可从以下 PromQL 起步；实际可用指标名以 target 的 `/metrics`
 为准，因为会随 Ray 版本和组件变化：
@@ -51,6 +52,10 @@ ray_tasks
 ray_object_store_memory
 ray_node_cpu_utilization
 ```
+
+Grafana 内置“Daft 与 Ray 本地运行概览”看板：Ray 的 CPU 与 object store 来自 5 秒抓取；
+Daft 音频作业在完成时通过 Pushgateway 写入总耗时、行数、状态、ASR/LLM P95 延迟。指标仅
+保留当前环境生命周期，重建 Prometheus 或 Pushgateway 后会清空。
 
 ## 运行真实音频 smoke
 
