@@ -37,6 +37,10 @@ def push_run_metrics(url: str | None, summary: dict[str, Any]) -> None:
         ("asr_p95_ms", "daft_audio_asr_latency_p95_milliseconds"),
         ("llm_p50_ms", "daft_audio_llm_latency_p50_milliseconds"),
         ("llm_p95_ms", "daft_audio_llm_latency_p95_milliseconds"),
+        ("audio_seconds_per_wall_second", "daft_audio_run_audio_seconds_per_wall_second"),
+        ("input_megabytes_per_second", "daft_audio_run_input_megabytes_per_second"),
+        ("ray_process_rss_peak_bytes", "daft_audio_ray_process_rss_peak_bytes"),
+        ("object_store_used_peak_bytes", "daft_audio_object_store_used_peak_bytes"),
     ):
         if summary.get(key) is not None:
             lines.append(f"{metric} {float(summary[key])}")

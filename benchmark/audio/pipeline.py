@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import csv
 import json
 import os
 import signal
@@ -331,6 +332,20 @@ def run_pipeline(cfg: BenchmarkConfig) -> dict[str, Any]:
                 if values:
                     summary[f"{prefix}_p50_ms"] = values[len(values) // 2]
                     summary[f"{prefix}_p95_ms"] = values[min(len(values) - 1, int(len(values) * 0.95))]
+            if elapsed:
+                summary["audio_seconds_per_wall_second"] = summary["audio_seconds"] / elapsed
+                summary["input_megabytes_per_second"] = summary["input_bytes"] / elapsed / 1_000_000
+        resources_path = run_dir / "resources.csv"
+        if resources_path.exists():
+            with resources_path.open(newline="") as resources_file:
+                samples = list(csv.DictReader(resources_file))
+            for field, metric in (
+                ("ray_process_rss_bytes", "ray_process_rss_peak_bytes"),
+                ("object_store_used_bytes", "object_store_used_peak_bytes"),
+            ):
+                values = [float(row[field]) for row in samples if row.get(field)]
+                if values:
+                    summary[metric] = max(values)
         write_json(run_dir / "summary.json", summary)
         try:
             push_run_metrics(os.getenv("BENCH_PROMETHEUS_PUSHGATEWAY_URL"), summary)
