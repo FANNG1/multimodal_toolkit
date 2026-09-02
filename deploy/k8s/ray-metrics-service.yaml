@@ -1,0 +1,15 @@
+# Prometheus 集群内抓取所有 Ray Pod 的 OpenMetrics endpoint（head 与 worker）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: daft-ray-metrics
+  namespace: daft-ray
+  labels:
+    app.kubernetes.io/name: daft-ray
+spec:
+  selector:
+    ray.io/cluster: daft-ray
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: 8080

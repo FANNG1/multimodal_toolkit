@@ -1,0 +1,5 @@
+# 本地 Daft/Ray 演示环境的所有资源都隔离在此命名空间，便于一键清理。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: daft-ray

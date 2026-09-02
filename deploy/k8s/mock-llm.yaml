@@ -1,0 +1,44 @@
+# 使用项目内 OpenAI-compatible Mock LLM，避免本地 E2E 依赖外部模型服务或密钥。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-llm
+  namespace: daft-ray
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-llm
+  template:
+    metadata:
+      labels:
+        app: mock-llm
+    spec:
+      containers:
+        - name: mock-llm
+          image: multimodal-toolkit:audio-local
+          imagePullPolicy: IfNotPresent
+          command: [python, -m, benchmark.audio, serve-mock, --host, 0.0.0.0, --port, "8010", --profile, fast]
+          ports:
+            - containerPort: 8010
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-llm
+  namespace: daft-ray
+spec:
+  selector:
+    app: mock-llm
+  ports:
+    - name: http
+      port: 8010
+      targetPort: http
