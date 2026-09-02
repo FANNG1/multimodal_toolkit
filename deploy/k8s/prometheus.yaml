@@ -10,6 +10,9 @@ data:
       scrape_interval: 5s
       evaluation_interval: 5s
     scrape_configs:
+      - job_name: daft-audio-pushgateway
+        static_configs:
+          - targets: [pushgateway:9091]
       - job_name: ray
         kubernetes_sd_configs:
           # Pod discovery 配合 Ray 节点标签，避免 Endpoints 元数据在不同

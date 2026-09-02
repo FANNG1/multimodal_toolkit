@@ -20,6 +20,7 @@ common_env=(
   "MINIO_ROOT_USER=minioadmin"
   "MINIO_ROOT_PASSWORD=minioadmin"
   "MINIO_REGION=us-east-1"
+  "BENCH_PROMETHEUS_PUSHGATEWAY_URL=http://pushgateway:9091"
   "NO_PROXY=minio,mock-llm,127.0.0.1,localhost"
   "no_proxy=minio,mock-llm,127.0.0.1,localhost"
 )
