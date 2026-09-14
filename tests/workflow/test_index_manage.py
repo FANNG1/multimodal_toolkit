@@ -1,8 +1,8 @@
 """在本地 Lance 表上验证 workflow/index.py 和 workflow/manage.py。
 
 build_embedding_index 的真实 Ray 路径不属于默认测试；需要时用 `pytest -m ray`
-显式执行。pylance 已升级到 9.0.0，但 delete_by_date 仍有意不执行 compaction，
-因此删除测试继续留在默认测试集。
+显式执行。delete_by_date 会执行分布式 compaction，因此删除测试使用共享的 local_ray
+fixture，并同时覆盖普通表和 Blob v2 表。
 """
 from __future__ import annotations
 
@@ -46,6 +46,37 @@ def lance_uri() -> str:
     tmp = tempfile.mkdtemp()
     uri = str(pathlib.Path(tmp) / "table.lance")
     lance.write_dataset(_make_table(), uri)
+    return uri
+
+
+@pytest.fixture()
+def lance_uri_blob() -> str:
+    """按资产表的写入方式创建多 fragment 的 Blob v2 表。
+
+    每批 100 行分开 append，确保删除后 compaction 至少有多个 fragment 可以合并；
+    这能覆盖 pylance 9 与 lance-ray 0.5 的真实 Blob v2 表维护链路。
+    """
+    import daft
+    from daft import col
+
+    tmp = tempfile.mkdtemp()
+    uri = str(pathlib.Path(tmp) / "table_blob.lance")
+    for batch in range(3):
+        times = [datetime(2024, 1, batch + 1, tzinfo=timezone.utc)] * 100
+        df = daft.from_pydict(
+            {
+                "doc_id": [f"blob_{batch}_{row:04d}" for row in range(100)],
+                "ingest_time": times,
+                "blob": [b"x" * 100] * 100,
+            }
+        ).with_column(
+            "ingest_time", col("ingest_time").cast(daft.DataType.timestamp("us", "UTC"))
+        )
+        df.write_lance(
+            uri,
+            mode="create" if batch == 0 else "append",
+            blob_columns=["blob"],
+        )
     return uri
 
 
@@ -120,18 +151,35 @@ def test_delete_requires_a_bound(lance_uri):
         delete_by_date(lance_uri)
 
 
-def test_delete_before(lance_uri):
+def test_delete_before(lance_uri, local_ray):
     delete_by_date(lance_uri, before="2024-03-01")
     assert lance.dataset(lance_uri).count_rows() == 200  # 2024-01-01 rows gone
 
 
-def test_delete_after(lance_uri):
+def test_delete_after(lance_uri, local_ray):
     delete_by_date(lance_uri, after="2024-09-01")
     assert lance.dataset(lance_uri).count_rows() == 200  # 2024-12-01 rows gone
 
 
-def test_delete_window(lance_uri):
+def test_delete_window(lance_uri, local_ray):
     # Outside 2024-03-01 .. 2024-09-01 survives: keeps Jan and Dec rows.
     delete_by_date(lance_uri, before="2024-09-01", after="2024-03-01")
     remaining = lance.dataset(lance_uri).count_rows()
     assert remaining == 200
+
+
+def test_delete_and_compact_blob_v2_table(lance_uri_blob, local_ray):
+    """删除后必须能压实 Blob v2 表，并保持剩余 blob 可读。"""
+    from multimodal_toolkit.storage.blob import validate_blob_v2
+
+    # Daft 的执行配置会影响每次 append 实际写出的 fragment 数；这里只约束
+    # compaction 的核心语义：压实前确实有多个 fragment，压实后数量必须减少。
+    fragments_before = len(lance.dataset(lance_uri_blob).get_fragments())
+    assert fragments_before > 1
+    delete_by_date(lance_uri_blob, before="2024-01-02")
+
+    dataset = lance.dataset(lance_uri_blob)
+    assert dataset.count_rows() == 200
+    assert len(dataset.get_fragments()) < fragments_before
+    assert len(dataset.take_blobs("blob", indices=[0])[0].read()) == 100
+    validate_blob_v2(lance_uri_blob, "blob")

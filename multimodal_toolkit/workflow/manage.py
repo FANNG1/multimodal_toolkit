@@ -2,7 +2,7 @@
 
 表管理仍遵循项目的数据 API 优先级：
   delete        → pylance ds.delete()               （Daft/lance-ray 没有等价 API）
-  compact       → 暂不执行；升级 pylance 后仍需单独验证 lance-ray 和对象存储路径
+  compact       → lance_ray.compact_files()        （删除后回收小文件与删除向量）
   cleanup       → pylance ds.cleanup_old_versions() （没有替代 API）
 
   --before DATE   删除 ingest_time < DATE 的行
@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 
 import lance
+import lance_ray
 
 from ..storage.io import lance_storage_options
 
@@ -42,10 +43,17 @@ def delete_by_date(
 
     print(f"[ok] deleted rows where: {filter_str}")
 
-    # pylance 9.0.0 已修复 Blob v2 compaction 的解码问题，但版本升级本身不等于
-    # 分布式 compaction 链路已经验证。这里继续跳过，待后续改动同时覆盖 lance-ray、
-    # 本地 Lance URI 和 MinIO/S3 后再开启，避免依赖升级悄悄扩大表管理行为。
-    print("[warn] compaction skipped; enable after validating lance-ray and object storage")
+    # lance-ray 0.5.0 在未传 compaction_options 时会构造默认选项；不再需要 0.4.x
+    # 为绕过 None 传参缺陷而显式传入空字典。压实必须在删除提交之后执行，才能把删除
+    # 向量和小文件合并成新的 fragment。
+    metrics = lance_ray.compact_files(
+        lance_uri,
+        storage_options=lance_storage_options(lance_uri),
+    )
+    if metrics is None:
+        print(f"[ok] no compaction needed: {lance_uri}")
+    else:
+        print(f"[ok] compacted: {lance_uri}")
     ds.cleanup_old_versions()
 
 

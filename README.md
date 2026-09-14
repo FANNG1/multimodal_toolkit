@@ -66,7 +66,7 @@ Manifest (parquet / jsonl / csv)
                 │
                 └──▶  Stage 5 — workflow/manage.py
                       pylance ds.delete()        : --before / --after
-                      compaction                 : 当前暂不执行
+                      lance_ray.compact_files    : delete 之后自动执行
 ```
 
 ### 引擎分工
@@ -74,7 +74,7 @@ Manifest (parquet / jsonl / csv)
 | 引擎           | 用于                                                                        | 原因                                                        |
 |----------------|-----------------------------------------------------------------------------|-------------------------------------------------------------|
 | **Daft**       | manifest 读取、S3 下载、ASR/LLM 流水线、Lance 写入（Stage 1 & 2）、标量与 ANN 查询 | 主引擎；API 稳定                                            |
-| **lance_ray**  | IVF_PQ 向量索引创建、`compact_files`                                        | 分布式索引与表维护能力；本项目暂未启用 compaction             |
+| **lance_ray**  | IVF_PQ 向量索引创建、`compact_files`                                        | 分布式索引与删除后的表维护                                   |
 | **pylance**    | ZONEMAP 标量索引、行删除、`cleanup_old_versions`                            | ZONEMAP：lance_ray 依赖未发布代码；delete：只有这一个 API    |
 | **daft_lance** | `read_lance`、`write_lance` 等 Daft 数据操作                                | 不用于建索引；Daft 优先原则只适用于数据处理                 |
 
@@ -459,6 +459,7 @@ S3 上的 Lance 表读写由底层库覆盖，但在本 POC 中应作为一个�
 Stage 3 固定使用 lance-ray 0.5.0 的分布式提交链路，不再回退到 pylance 单机建索引。这样调用方
 能明确获知 Ray、对象存储凭据或索引提交失败，避免大表在驱动进程静默退化为单机执行。
 
-**blob v2 资产表的 compaction 仍暂时禁用。**
-本次依赖升级不改变 Stage 5 的表管理行为；删除行之后仍跳过 compaction。后续启用时需单独覆盖
-lance-ray、本地 Lance URI 和 MinIO/S3 的 Blob v2 回归验证，避免把版本对齐和行为变更混在一起。
+**删除后会执行 Blob v2 compaction。**
+Stage 5 先提交删除，再使用 lance-ray 0.5.0 的默认 compaction 选项压实文件和删除向量，最后清理旧版本。
+0.4.x 中为规避 `compaction_options=None` 缺陷而传入空字典的 workaround 已移除。对象存储部署仍应在
+发布前验证 worker 凭据、共享 Lance URI 和 Blob v2 读取。

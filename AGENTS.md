@@ -28,7 +28,7 @@ tests/                 # pytest；按 audio/image/storage/workflow 分目录
 ## 硬性架构约定
 
 1. **媒体隔离**：audio 和 image 各自拥有独立的 package 和 workflow 入口，**不要**把共享 Stage 参数化成"通用管线"。可共享的只有 `storage/` 层 infra 和 `config.py` 的辅助函数。
-2. **数据 API 优先级**：所有数据操作优先用 **Daft**；Daft 做不到再用 **lance-ray**；**pylance 直接调用是最后手段**。当前固定为 lance-ray 0.5.0 与 pylance 9.0.0；blob compaction 仍需在单独改动中完成对象存储回归验证后再启用。
+2. **数据 API 优先级**：所有数据操作优先用 **Daft**；Daft 做不到再用 **lance-ray**；**pylance 直接调用是最后手段**。当前固定为 lance-ray 0.5.0 与 pylance 9.0.0；Blob v2 表删除后由 lance-ray 执行分布式 compaction，涉及该路径的改动必须覆盖本地和对象存储回归验证。
 3. **行不丢弃**：analyze 阶段 manifest 里每个条目对应输出一行，失败用 `status` 列标记（`download_failed` / `decode_failed` / ...），分数结论置 null。合规场景必须能区分"内容有问题"和"根本没处理"。
 4. **配置只走环境变量**，经 `config.py` 的 `env_int`/`env_bool`/`env_choice` 等辅助函数读取。注意：Daft 原生只读少数 `DAFT_*` 环境变量，新增 Daft 执行参数必须在 `storage/io.py::configure_daft_runner()` 里显式传给 `daft.set_execution_config()`，否则是死配置；S3 参数同理要传进 `daft_io_config()` 的 `S3Config`。
 5. **写出受控**：`write_lance` 必须传 `LANCE_MAX_ROWS_PER_FILE` / `LANCE_MAX_BYTES_PER_FILE`；JSONL 写出前用 `coalesce_for_write()` 收敛分区，避免小文件。
