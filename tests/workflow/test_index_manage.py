@@ -1,7 +1,7 @@
 """在本地 Lance 表上验证 workflow/index.py 和 workflow/manage.py。
 
 build_embedding_index 的真实 Ray 路径不属于默认测试；需要时用 `pytest -m ray`
-显式执行。pylance 已升级到 8.0.0，但 delete_by_date 仍有意不执行 compaction，
+显式执行。pylance 已升级到 9.0.0，但 delete_by_date 仍有意不执行 compaction，
 因此删除测试继续留在默认测试集。
 """
 from __future__ import annotations
@@ -91,41 +91,14 @@ def test_build_embedding_index_uses_lance_ray(monkeypatch, lance_uri):
     ]
 
 
-def test_build_embedding_index_falls_back_to_pylance(monkeypatch):
-    calls = []
-
-    class FakeSchema:
-        names = ["audio_embedding"]
-
-    class FakeDataset:
-        schema = FakeSchema()
-
-        def create_index(self, column, **kwargs):
-            calls.append((column, kwargs))
-
+def test_build_embedding_index_propagates_lance_ray_failure(monkeypatch, lance_uri):
     def fake_create_index(uri, **kwargs):
-        raise RuntimeError("ray worker failed")
+        raise RuntimeError("distributed index failed")
 
-    monkeypatch.setattr(
-        "multimodal_toolkit.workflow.index.lance.dataset",
-        lambda *args, **kwargs: FakeDataset(),
-    )
     monkeypatch.setattr("multimodal_toolkit.workflow.index.lance_ray.create_index", fake_create_index)
 
-    build_embedding_index("table.lance", num_partitions=1, sample_rate=2, index_type="IVF_FLAT")
-
-    assert calls == [
-        (
-            "audio_embedding",
-            {
-                "index_type": "IVF_FLAT",
-                "replace": True,
-                "num_partitions": 1,
-                "sample_rate": 2,
-                "storage_options": None,
-            },
-        )
-    ]
+    with pytest.raises(RuntimeError, match="distributed index failed"):
+        build_embedding_index(lance_uri, num_partitions=1, sample_rate=2, index_type="IVF_FLAT")
 
 
 def test_build_embedding_index_missing_column(lance_uri_no_embedding):

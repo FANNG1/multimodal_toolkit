@@ -112,7 +112,7 @@ CPU/网络 在下载下一批图片
 | `LANCE_MAX_BYTES_PER_FILE` | `512MB` | 单个 Lance 数据文件最大字节数。 |
 | `DAFT_JSON_TARGET_FILESIZE` | `128MB` | JSONL 单文件目标大小。 |
 
-为什么要管：碎文件会拖慢后续所有读取。虽然 pylance 已升级到 8.0.0，Stage 5 仍要等
+为什么要管：碎文件会拖慢后续所有读取。虽然 pylance 已升级到 9.0.0，Stage 5 仍要等
 lance-ray 和对象存储路径完成独立回归验证后才会开启 blob compaction；在此之前仍应从写入侧
 控制文件布局。默认值一般不用动。
 

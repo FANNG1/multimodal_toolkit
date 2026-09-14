@@ -42,7 +42,7 @@ def delete_by_date(
 
     print(f"[ok] deleted rows where: {filter_str}")
 
-    # pylance 8.0.0 已修复 Blob v2 compaction 的解码问题，但版本升级本身不等于
+    # pylance 9.0.0 已修复 Blob v2 compaction 的解码问题，但版本升级本身不等于
     # 分布式 compaction 链路已经验证。这里继续跳过，待后续改动同时覆盖 lance-ray、
     # 本地 Lance URI 和 MinIO/S3 后再开启，避免依赖升级悄悄扩大表管理行为。
     print("[warn] compaction skipped; enable after validating lance-ray and object storage")
