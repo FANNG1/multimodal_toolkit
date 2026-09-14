@@ -1,15 +1,15 @@
-"""Stage 5: manage the lance asset table — delete rows by ingest_time range.
+"""Stage 5：按 ingest_time 范围删除 Lance 资产表中的行。
 
-API priority (lance_ray preferred for table management):
-  delete        → pylance ds.delete()              (no Daft/lance-ray equivalent)
-  compact       → disabled for blob v2 tables until pylance 8 is supported
-  cleanup       → pylance ds.cleanup_old_versions() (no alternative)
+表管理仍遵循项目的数据 API 优先级：
+  delete        → pylance ds.delete()               （Daft/lance-ray 没有等价 API）
+  compact       → 暂不执行；升级 pylance 后仍需单独验证 lance-ray 和对象存储路径
+  cleanup       → pylance ds.cleanup_old_versions() （没有替代 API）
 
-  --before DATE   delete rows where ingest_time < DATE
-  --after  DATE   delete rows where ingest_time > DATE
+  --before DATE   删除 ingest_time < DATE 的行
+  --after  DATE   删除 ingest_time > DATE 的行
 
-DATE format: ISO 8601, e.g. 2025-01-01 or 2025-01-01T00:00:00
-At least one bound must be provided; both can be combined for a date range.
+DATE 使用 ISO 8601 格式，例如 2025-01-01 或 2025-01-01T00:00:00。
+至少传一个边界；两个边界可以组合成日期范围。
 """
 from __future__ import annotations
 
@@ -35,16 +35,17 @@ def delete_by_date(
         clauses.append(f"ingest_time > timestamp '{after}'")
     filter_str = " AND ".join(clauses)
 
-    # delete: pylance only (no Daft/lance-ray equivalent)
+    # 删除目前只有 pylance 提供 API；这里保留直接调用，不能为了统一入口而绕过
+    # Lance 自身的事务提交语义。
     ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
     ds.delete(filter_str)
 
     print(f"[ok] deleted rows where: {filter_str}")
 
-    # Blob v2 tables cannot be compacted safely on pylance 7.x
-    # (lance-format/lance#7071). Keep compaction disabled until the project
-    # can move to pylance 8.x together with a compatible lance-ray release.
-    print("[warn] compaction skipped; enable after upgrading to pylance 8.x")
+    # pylance 8.0.0 已修复 Blob v2 compaction 的解码问题，但版本升级本身不等于
+    # 分布式 compaction 链路已经验证。这里继续跳过，待后续改动同时覆盖 lance-ray、
+    # 本地 Lance URI 和 MinIO/S3 后再开启，避免依赖升级悄悄扩大表管理行为。
+    print("[warn] compaction skipped; enable after validating lance-ray and object storage")
     ds.cleanup_old_versions()
 
 

@@ -1,9 +1,8 @@
-"""Tests for workflow/index.py and workflow/manage.py — local lance tables.
+"""在本地 Lance 表上验证 workflow/index.py 和 workflow/manage.py。
 
-build_embedding_index is marked `ray` and excluded from the default run (see
-pyproject) — run it explicitly with `pytest -m ray`. delete_by_date does not
-compact while the project is pinned to pylance 7.x, so those tests stay in the
-default suite.
+build_embedding_index 的真实 Ray 路径不属于默认测试；需要时用 `pytest -m ray`
+显式执行。pylance 已升级到 8.0.0，但 delete_by_date 仍有意不执行 compaction，
+因此删除测试继续留在默认测试集。
 """
 from __future__ import annotations
 

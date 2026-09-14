@@ -410,8 +410,8 @@ python -m multimodal_toolkit.workflow.manage \
 |------|------|------|
 | Daft | 0.7.15 | 主执行引擎 |
 | daft-lance | 0.4.0 | `read_lance`、`write_lance`、`take_blobs`、`create_scalar_index`、`compact_files` |
-| pylance | 7.0.0 | Lance dataset、blob v2、ANN scanner、delete、cleanup |
-| lance-ray | 0.4.2 | 向量索引创建；写回路径暂缓 |
+| pylance | 8.0.0 | Lance dataset、blob v2、ANN scanner、delete、cleanup |
+| lance-ray | 0.4.2 | 向量索引创建；与 pylance 8 的分布式提交兼容性见下方限制 |
 | Ray | 2.55.1 | 由 lance-ray 引入；除非 `USE_RAY=1`，否则 Daft 走 native runner |
 
 Daft 默认 runner 是 `native`（本地多线程）。设置 `USE_RAY=1` 可把 Daft 相关步骤切到 Ray。
@@ -455,8 +455,12 @@ confidence 与 reason 字段在本地行中为 null。VLM 调用失败时仍保�
 **本地 Lance URI 已做端到端验证。**
 S3 上的 Lance 表读写由底层库覆盖，但在本 POC 中应作为一个独立的验证项对待。
 
-**blob v2 资产表的 compaction 暂时禁用。**
-当前 `lance-ray 0.4.2` 的向量索引创建依赖 pylance 7.x，而 pylance 8.0.0 虽然修复了 blob v2
-compaction，却改动了 `lance-ray 0.4.2` 仍在调用的分布式索引 commit API。项目暂时锁定
-`pylance<8.0.0`，Stage 5 在删除行之后跳过 compaction。等升级到 pylance 8.x 并配套兼容的
-lance-ray 版本后再重新开启 blob v2 compaction。
+**pylance 8.0.0 与 lance-ray 0.4.2 存在已知的分布式索引限制。**
+pylance 8.0.0 修复了 blob v2 compaction，但移除了 `lance-ray 0.4.2` 在分布式向量索引提交阶段
+调用的 `create_index_segment_builder()`。Stage 3 会捕获该错误并回退到 pylance 本地建索引，
+所以索引功能仍可用，但大表会失去 Ray 分布式建索引的资源扩展能力。等配套兼容的 lance-ray
+版本可用后，应移除这条回退限制。
+
+**blob v2 资产表的 compaction 仍暂时禁用。**
+本次依赖升级不改变 Stage 5 的表管理行为；删除行之后仍跳过 compaction。后续启用时需单独覆盖
+lance-ray、本地 Lance URI 和 MinIO/S3 的 Blob v2 回归验证，避免把版本对齐和行为变更混在一起。
