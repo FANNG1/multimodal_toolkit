@@ -74,9 +74,9 @@ Manifest (parquet / jsonl / csv)
 | 引擎           | 用于                                                                        | 原因                                                        |
 |----------------|-----------------------------------------------------------------------------|-------------------------------------------------------------|
 | **Daft**       | manifest 读取、S3 下载、ASR/LLM 流水线、Lance 写入（Stage 1 & 2）、标量与 ANN 查询 | 主引擎；API 稳定                                            |
-| **lance_ray**  | IVF_PQ 向量索引创建、`compact_files`                                        | Lance 表管理的首选；可用分布式 Ray worker                   |
+| **lance_ray**  | IVF_PQ 向量索引创建、`compact_files`                                        | 分布式索引与删除后的表维护                                   |
 | **pylance**    | ZONEMAP 标量索引、行删除、`cleanup_old_versions`                            | ZONEMAP：lance_ray 依赖未发布代码；delete：只有这一个 API    |
-| **daft_lance** | lance_ray 不可用时 `compact_files` 的兜底                                   | 不用于建索引；Daft 优先原则只适用于数据处理                 |
+| **daft_lance** | `read_lance`、`write_lance` 等 Daft 数据操作                                | 不用于建索引；Daft 优先原则只适用于数据处理                 |
 
 ## 环境准备
 
@@ -410,8 +410,8 @@ python -m multimodal_toolkit.workflow.manage \
 |------|------|------|
 | Daft | 0.7.15 | 主执行引擎 |
 | daft-lance | 0.4.0 | `read_lance`、`write_lance`、`take_blobs`、`create_scalar_index`、`compact_files` |
-| pylance | 7.0.0 | Lance dataset、blob v2、ANN scanner、delete、cleanup |
-| lance-ray | 0.4.2 | 向量索引创建；写回路径暂缓 |
+| pylance | 9.0.0 | Lance dataset、blob v2、ANN scanner、delete、cleanup |
+| lance-ray | 0.5.0 | 分布式向量索引创建与分布式 compaction API |
 | Ray | 2.55.1 | 由 lance-ray 引入；除非 `USE_RAY=1`，否则 Daft 走 native runner |
 
 Daft 默认 runner 是 `native`（本地多线程）。设置 `USE_RAY=1` 可把 Daft 相关步骤切到 Ray。
@@ -455,8 +455,11 @@ confidence 与 reason 字段在本地行中为 null。VLM 调用失败时仍保�
 **本地 Lance URI 已做端到端验证。**
 S3 上的 Lance 表读写由底层库覆盖，但在本 POC 中应作为一个独立的验证项对待。
 
-**blob v2 资产表的 compaction 暂时禁用。**
-当前 `lance-ray 0.4.2` 的向量索引创建依赖 pylance 7.x，而 pylance 8.0.0 虽然修复了 blob v2
-compaction，却改动了 `lance-ray 0.4.2` 仍在调用的分布式索引 commit API。项目暂时锁定
-`pylance<8.0.0`，Stage 5 在删除行之后跳过 compaction。等升级到 pylance 8.x 并配套兼容的
-lance-ray 版本后再重新开启 blob v2 compaction。
+**分布式向量索引失败会直接报错。**
+Stage 3 固定使用 lance-ray 0.5.0 的分布式提交链路，不再回退到 pylance 单机建索引。这样调用方
+能明确获知 Ray、对象存储凭据或索引提交失败，避免大表在驱动进程静默退化为单机执行。
+
+**删除后会执行 Blob v2 compaction。**
+Stage 5 先提交删除，再使用 lance-ray 0.5.0 的默认 compaction 选项压实文件和删除向量，最后清理旧版本。
+0.4.x 中为规避 `compaction_options=None` 缺陷而传入空字典的 workaround 已移除。对象存储部署仍应在
+发布前验证 worker 凭据、共享 Lance URI 和 Blob v2 读取。

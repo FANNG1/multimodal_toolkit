@@ -1,21 +1,22 @@
-"""Stage 5: manage the lance asset table — delete rows by ingest_time range.
+"""Stage 5：按 ingest_time 范围删除 Lance 资产表中的行。
 
-API priority (lance_ray preferred for table management):
-  delete        → pylance ds.delete()              (no Daft/lance-ray equivalent)
-  compact       → disabled for blob v2 tables until pylance 8 is supported
-  cleanup       → pylance ds.cleanup_old_versions() (no alternative)
+表管理仍遵循项目的数据 API 优先级：
+  delete        → pylance ds.delete()               （Daft/lance-ray 没有等价 API）
+  compact       → lance_ray.compact_files()        （删除后回收小文件与删除向量）
+  cleanup       → pylance ds.cleanup_old_versions() （没有替代 API）
 
-  --before DATE   delete rows where ingest_time < DATE
-  --after  DATE   delete rows where ingest_time > DATE
+  --before DATE   删除 ingest_time < DATE 的行
+  --after  DATE   删除 ingest_time > DATE 的行
 
-DATE format: ISO 8601, e.g. 2025-01-01 or 2025-01-01T00:00:00
-At least one bound must be provided; both can be combined for a date range.
+DATE 使用 ISO 8601 格式，例如 2025-01-01 或 2025-01-01T00:00:00。
+至少传一个边界；两个边界可以组合成日期范围。
 """
 from __future__ import annotations
 
 import argparse
 
 import lance
+import lance_ray
 
 from ..storage.io import lance_storage_options
 
@@ -35,16 +36,24 @@ def delete_by_date(
         clauses.append(f"ingest_time > timestamp '{after}'")
     filter_str = " AND ".join(clauses)
 
-    # delete: pylance only (no Daft/lance-ray equivalent)
+    # 删除目前只有 pylance 提供 API；这里保留直接调用，不能为了统一入口而绕过
+    # Lance 自身的事务提交语义。
     ds = lance.dataset(lance_uri, storage_options=lance_storage_options(lance_uri))
     ds.delete(filter_str)
 
     print(f"[ok] deleted rows where: {filter_str}")
 
-    # Blob v2 tables cannot be compacted safely on pylance 7.x
-    # (lance-format/lance#7071). Keep compaction disabled until the project
-    # can move to pylance 8.x together with a compatible lance-ray release.
-    print("[warn] compaction skipped; enable after upgrading to pylance 8.x")
+    # lance-ray 0.5.0 在未传 compaction_options 时会构造默认选项；不再需要 0.4.x
+    # 为绕过 None 传参缺陷而显式传入空字典。压实必须在删除提交之后执行，才能把删除
+    # 向量和小文件合并成新的 fragment。
+    metrics = lance_ray.compact_files(
+        lance_uri,
+        storage_options=lance_storage_options(lance_uri),
+    )
+    if metrics is None:
+        print(f"[ok] no compaction needed: {lance_uri}")
+    else:
+        print(f"[ok] compacted: {lance_uri}")
     ds.cleanup_old_versions()
 
 

@@ -10,7 +10,7 @@ dependencies = [
   "getdaft",
   "httpx",
   "insightface",
-  "lance-ray",
+  "lance-ray==0.5.0",
   "modelscope",
   "numpy",
   "onnxruntime",
@@ -19,13 +19,18 @@ dependencies = [
   "pillow",
   "psutil",
   "pyarrow",
-  "pylance<8.0.0",
+  "pylance==9.0.0",
   "python-dotenv",
   "ray",
   "soundfile",
   "torch",
   "torchaudio",
   "transformers",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=9.1.1",
 ]
 
 [tool.pytest.ini_options]

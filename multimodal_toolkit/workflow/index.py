@@ -42,20 +42,9 @@ def build_embedding_index(
     )
     if index_type in ("IVF_PQ", "IVF_HNSW_PQ"):
         kwargs["num_sub_vectors"] = num_sub_vectors
-    try:
-        lance_ray.create_index(lance_uri, **kwargs)
-    except Exception as exc:
-        print(f"[warn] lance_ray index build failed; falling back to pylance: {exc}")
-        fallback_kwargs: dict = dict(
-            index_type=index_type,
-            replace=True,
-            num_partitions=num_partitions,
-            sample_rate=sample_rate,
-            storage_options=storage_options,
-        )
-        if index_type in ("IVF_PQ", "IVF_HNSW_PQ"):
-            fallback_kwargs["num_sub_vectors"] = num_sub_vectors
-        ds.create_index(column, **fallback_kwargs)
+    # 向量索引必须由 lance-ray 的分布式提交链路完成。不能静默回退到 pylance
+    # 单机建索引，否则大表会在驱动进程失去并行能力且调用方无法感知执行模式变化。
+    lance_ray.create_index(lance_uri, **kwargs)
     print(f"[ok] built {index_type} index on {column} ({num_partitions} partitions): {lance_uri}")
 
 

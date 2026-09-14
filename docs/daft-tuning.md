@@ -112,7 +112,8 @@ CPU/网络 在下载下一批图片
 | `LANCE_MAX_BYTES_PER_FILE` | `512MB` | 单个 Lance 数据文件最大字节数。 |
 | `DAFT_JSON_TARGET_FILESIZE` | `128MB` | JSONL 单文件目标大小。 |
 
-为什么要管：碎文件会拖慢后续所有读取，而我们的 pylance 7 禁用了 blob compaction，写坏了没有事后补救，只能在写入侧控制。默认值一般不用动。
+为什么要管：碎文件会拖慢后续所有读取。Stage 5 会在删除后压实 Blob v2 表，但写入侧控制仍能
+降低 compaction 的资源消耗和文件膨胀；对象存储环境还应验证 worker 的共享 URI 与凭据。默认值一般不用动。
 
 ### 3.7 观测（长任务建议必开）
 
