@@ -5,9 +5,9 @@ description = "Minimal audio POC: S3 manifest -> Lance blob v2 -> analysis -> ac
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "daft-lance>=0.4.0",
+  "daft==0.7.26",
+  "daft-lance==0.6.0",
   "funasr",
-  "getdaft",
   "httpx",
   "insightface",
   "lance-ray==0.5.0",
@@ -19,7 +19,7 @@ dependencies = [
   "pillow",
   "psutil",
   "pyarrow",
-  "pylance==9.0.0",
+  "pylance==12.0.0",
   "python-dotenv",
   "ray",
   "soundfile",
