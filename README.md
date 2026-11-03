@@ -408,9 +408,9 @@ python -m multimodal_toolkit.workflow.manage \
 
 | 组件 | 版本 | 说明 |
 |------|------|------|
-| Daft | 0.7.15 | 主执行引擎 |
-| daft-lance | 0.4.0 | `read_lance`、`write_lance`、`take_blobs`、`create_scalar_index`、`compact_files` |
-| pylance | 9.0.0 | Lance dataset、blob v2、ANN scanner、delete、cleanup |
+| Daft | 0.7.26 | 主执行引擎 |
+| daft-lance | 0.6.0 | `read_lance`、`write_lance`、`take_blobs`、`create_scalar_index`、`compact_files` |
+| pylance | 12.0.0 | Lance dataset、blob v2、ANN scanner、delete、cleanup |
 | lance-ray | 0.5.0 | 分布式向量索引创建与分布式 compaction API |
 | Ray | 2.55.1 | 由 lance-ray 引入；除非 `USE_RAY=1`，否则 Daft 走 native runner |
 
@@ -435,10 +435,12 @@ Stage 4 的 `--vector-from` 也无从检索。需要重跑带 `--embed` 的 Stag
 `analysis_backend = 'local'` 或 `'llm'`。本地的 `is_avatar` 是确定性的「单张清晰人脸」规则；
 LLM 的 `is_avatar` 还会额外做语义构图判断。本地独有的检测器分数在 LLM 行中为 null，而 LLM 的
 confidence 与 reason 字段在本地行中为 null。VLM 调用失败时仍保留该 manifest 行，
-`status = 'llm_failed'` 且结论为 null。Daft 0.7.15 会把 UDF 的 `on_error` 选项泄漏进 OpenAI
-请求参数，因此本工作流用了一个小的 descriptor adapter，只剔除泄漏的 UDF 请求参数并跳过 null
-图片，同时保留 Daft 原生的 prompt 能力。此统一 schema 之前创建的表不会被迁移；请一次性创建
-统一资产表，之后本地批次与 LLM 批次即可共用。
+`status = 'llm_failed'` 且结论为 null。本工作流用了一个小的 descriptor adapter，剔除 UDF 请求
+参数并跳过 null 图片，同时保留 Daft 原生的 prompt 能力。其中「剔除泄漏的 UDF 选项」一职针对的
+是 Daft 0.7.15 把 `on_error` 泄漏进 OpenAI 请求参数的缺陷，该缺陷已在 Daft 0.7.21（上游 #7277）
+修复；adapter 目前仍然保留，因为它还承担「跳过 null 图片」与「逐行严格校验响应」两项职责。
+要移除这层 adapter 需要用真实的 VLM / DeepSeek key 验证，不要仅凭升级版本就删掉。
+此统一 schema 之前创建的表不会被迁移；请一次性创建统一资产表，之后本地批次与 LLM 批次即可共用。
 
 **IVF_PQ 的最小行数要求。**
 默认的 `--num-partitions 16` 至少需要 4096 行。行数更少的表请传 `--num-partitions 1`
@@ -450,7 +452,10 @@ confidence 与 reason 字段在本地行中为 null。VLM 调用失败时仍保�
 
 **每次入湖后都会校验 blob v2。**
 一旦 Lance 悄悄把 `audio_blob` 降级成 `large_binary`，`validate_blob_v2` 会立即抛错。
-测试新版本库时绝不要跳过这个检查。
+测试新版本库时绝不要跳过这个检查。升级到 daft-lance 0.6.0 后，null blob 的描述符写法变了
+（`uri`/`position`/`size` 从 `null`/`0`/`size` 改为全 null，并带上 null 掩码，使 `None` 与
+`b""` 不再混淆），`pylance` 的 `take_blobs` 也随之改为保持行对齐：null 行返回 `None` 占位，
+而不像 pylance 9 那样把该行整个从结果里丢掉。
 
 **本地 Lance URI 已做端到端验证。**
 S3 上的 Lance 表读写由底层库覆盖，但在本 POC 中应作为一个独立的验证项对待。

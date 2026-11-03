@@ -1,7 +1,9 @@
 """在本地 Lance 表上验证 workflow/index.py 和 workflow/manage.py。
 
-build_embedding_index 的真实 Ray 路径不属于默认测试；需要时用 `pytest -m ray`
-显式执行。delete_by_date 会执行分布式 compaction，因此删除测试使用共享的 local_ray
+本文件里的 build_embedding_index 用 monkeypatch 打桩，只断言"确实走了
+lance_ray.create_index"以及失败会向上抛；真实建索引链路由
+tests/image/test_embedding_pipeline.py 覆盖。
+delete_by_date 会执行分布式 compaction，因此删除测试使用共享的 local_ray
 fixture，并同时覆盖普通表和 Blob v2 表。
 """
 from __future__ import annotations
@@ -54,7 +56,7 @@ def lance_uri_blob() -> str:
     """按资产表的写入方式创建多 fragment 的 Blob v2 表。
 
     每批 100 行分开 append，确保删除后 compaction 至少有多个 fragment 可以合并；
-    这能覆盖 pylance 9 与 lance-ray 0.5 的真实 Blob v2 表维护链路。
+    这能覆盖 pylance 12 与 lance-ray 0.5 的真实 Blob v2 表维护链路。
     """
     import daft
     from daft import col

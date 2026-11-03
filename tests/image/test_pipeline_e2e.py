@@ -162,8 +162,16 @@ def test_ingest_blob_presence_matches_status(pipeline):
     ok_blob = ds.take_blobs("image_blob", indices=[row_index["face_sharp.jpg"]])[0]
     assert len(ok_blob.read()) > 0
 
-    # take_blobs skips null blobs entirely — a failed row yields an empty list.
-    assert ds.take_blobs("image_blob", indices=[row_index["missing.jpg"]]) == []
+    # pylance 12 的 take_blobs 保持行对齐：null blob 返回 None 占位，而不像
+    # pylance 9 那样把该行整个从结果里丢掉。这正是「行不丢弃」要的语义——
+    # 调用方能按下标把结果映射回原来的行。
+    assert ds.take_blobs("image_blob", indices=[row_index["missing.jpg"]]) == [None]
+
+    # 混合取值时返回值与 indices 一一对应，不会因为中间夹着 null 而整体错位。
+    idx = sorted([row_index["face_sharp.jpg"], row_index["missing.jpg"]])
+    mixed = ds.take_blobs("image_blob", indices=idx)
+    assert len(mixed) == len(idx)
+    assert [b is None for b in mixed] == [tbl["status"][i] != "ok" for i in idx]
 
 
 # ---------------------------------------------------------------------------
