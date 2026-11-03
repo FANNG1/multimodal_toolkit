@@ -29,6 +29,7 @@ kubectl --context "$kubectl_context" wait --namespace daft-ray \
 
 kubectl --context "$kubectl_context" apply -f "$project_root/deploy/k8s/raycluster.yaml"
 kubectl --context "$kubectl_context" apply -f "$project_root/deploy/k8s/ray-metrics-service.yaml"
+kubectl --context "$kubectl_context" apply -f "$project_root/deploy/k8s/nodeport-services.yaml"
 
 kubectl wait --context "$kubectl_context" --namespace daft-ray \
   --for=condition=ready pod -l ray.io/node-type=head --timeout=5m

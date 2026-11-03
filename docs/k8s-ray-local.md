@@ -12,7 +12,7 @@ MinIO (cluster-local) → Daft download → SenseVoice ASR → Mock LLM → Lanc
 ```
 
 Ray Dashboard 由 KubeRay head 提供；Prometheus 仅抓取 Ray head 和 worker 的内置
-OpenMetrics 指标。本环境不安装 Grafana，也不暴露业务自定义指标。
+OpenMetrics 指标。Grafana 通过独立 NodePort 提供本地访问，不需要端口转发。
 
 ## 前置条件
 
@@ -33,16 +33,19 @@ scripts/k8s/status.sh
 版本 KubeRay operator，并部署 MinIO、Mock LLM、RayCluster 和 Prometheus。镜像完整安装
 当前 `uv.lock` 的项目依赖，但声明为 CPU-only，不请求 GPU。
 
-在独立终端执行端口转发：
+启动后直接通过 Minikube 节点地址访问：
 
 ```bash
-kubectl --context daft-ray -n daft-ray port-forward service/daft-ray-head-svc 8265:8265
-kubectl --context daft-ray -n daft-ray port-forward service/prometheus 9090:9090
+minikube_ip="$(minikube ip --profile daft-ray)"
+echo "Ray Dashboard: http://${minikube_ip}:30265"
+echo "Grafana:       http://${minikube_ip}:30300"
 ```
 
-- Ray Dashboard：<http://127.0.0.1:8265>
+- Ray Dashboard：`http://<minikube-ip>:30265`
 - Prometheus targets：<http://127.0.0.1:9090/targets>
-- Grafana：<http://127.0.0.1:3000>（本地开发账号 `admin` / `admin`）
+- Grafana：`http://<minikube-ip>:30300`（本地开发账号 `admin` / `admin`）
+
+NodePort 只用于本地开发；Dashboard 和 Grafana 当前没有生产级认证，不应暴露到公网。
 
 所有 Ray target 应为 `UP`。可从以下 PromQL 起步；实际可用指标名以 target 的 `/metrics`
 为准，因为会随 Ray 版本和组件变化：
